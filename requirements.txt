@@ -2,3 +2,4 @@ beautifulsoup4
 ebooklib
 lxml
 weasyprint
+pypdf
