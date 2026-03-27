@@ -27,24 +27,6 @@ The current workflow is:
 - Optional limit on blank pages added to fill the final signature
 - Output files written into an organized output folder
 
-## Current Scripts
-
-### `epub_to_pdf.py`
-
-Creates a formatted interior PDF from an EPUB.
-
-By default it:
-- reads title and author from EPUB metadata
-- creates a title page
-- inserts a blank page after the title page
-- starts the main text on a recto page
-- applies bookbinding-friendly mirrored margins
-- numbers pages at the bottom centre
-- writes the output to a new folder next to the EPUB
-
-Example output structure:
-
-```text
-Running_on_Air.epub
-Running_on_Air_output/
-  interior.pdf
+## Requirements
+Python 3.10+
+WeasyPrint system dependencies installed correctly
