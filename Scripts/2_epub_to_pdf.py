@@ -13,7 +13,6 @@ Features:
 - Fails cleanly if WeasyPrint native libraries are missing
 
 Example:
-    python epub_to_pdf.py "C:\\Users\\jonat\\Documents\\Bees_Books\\Running_on_Air.epub"
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ else:
 
 
 DEFAULT_FONT_STACK = '"Garamond", "EB Garamond", "Cormorant Garamond", serif'
-DEFAULT_EPUB_PATH = r"C:\Users\jonat\Documents\Bees_Books\Running_on_Air.epub"
+DEFAULT_EPUB_PATH = r"C:\Running_on_Air.epub"
 
 
 def cm(value: float) -> str:
