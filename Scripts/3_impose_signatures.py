@@ -4,18 +4,25 @@ Impose a book interior PDF into 2-up printer spreads for signatures.
 
 Features:
 - Defaults to 16-page signatures
-- Adds blanks only at the end
-- Optional limit on end padding
+- Adds blank pages only at the end
+- Can limit how many blank end pages are allowed
 - Ignores unknown IDE/PyDev arguments
-- Prompts for input PDF if not supplied
+- Prompts for input/output if needed
+- By default writes output into the same *_output folder as the interior PDF
 
-Example:
-    python impose_signatures.py interior.pdf imposed_16sig.pdf
+Typical workflow:
+    1. Run epub_to_pdf.py
+    2. This creates something like:
+       C:\\Users\\jonat\\Documents\\Bees_Books\\Running_on_Air_output\\interior.pdf
+    3. Run this script on that PDF
+    4. It creates:
+       C:\\Users\\jonat\\Documents\\Bees_Books\\Running_on_Air_output\\imposed_16sig.pdf
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -24,16 +31,23 @@ from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf._page import PageObject
 
 
-DEFAULT_INPUT_PDF = "interior.pdf"
-DEFAULT_OUTPUT_PDF = "imposed_16sig.pdf"
+DEFAULT_INPUT_PDF = r"C:\Users\jonat\Documents\Bees_Books\Running_on_Air_output\interior.pdf"
 
 
-def get_paths_interactively() -> Tuple[str, str]:
+def safe_name(name: str) -> str:
+    name = re.sub(r"\s+", "_", name.strip())
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    return name or "book"
+
+
+def get_paths_interactively() -> Tuple[str, Optional[str]]:
     print("No PDF paths were provided.")
-    print(f"Press Enter to use defaults:\n  input:  {DEFAULT_INPUT_PDF}\n  output: {DEFAULT_OUTPUT_PDF}\n")
+    print(f"Press Enter to use the example input path:\n{DEFAULT_INPUT_PDF}\n")
     input_path = input("Input PDF path: ").strip() or DEFAULT_INPUT_PDF
-    output_path = input("Output PDF path: ").strip() or DEFAULT_OUTPUT_PDF
-    return input_path, output_path
+    output_path = input(
+        "Output PDF path (press Enter to auto-place it in the same output folder): "
+    ).strip()
+    return input_path, (output_path or None)
 
 
 def make_blank_like(page: PageObject) -> PageObject:
@@ -48,6 +62,14 @@ def next_multiple(n: int, m: int) -> int:
 
 
 def signature_sheet_pairs(sig_size: int) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """
+    Return sheet pairings for one signature.
+
+    For a 16-page signature:
+      sheet 1 front: (16, 1), back: (2, 15)
+      sheet 2 front: (14, 3), back: (4, 13)
+      ...
+    """
     if sig_size % 4 != 0:
         raise ValueError("Signature size must be a multiple of 4")
 
@@ -66,6 +88,9 @@ def signature_sheet_pairs(sig_size: int) -> List[Tuple[Tuple[int, int], Tuple[in
 
 
 def create_sheet_page(left_page: PageObject, right_page: PageObject) -> PageObject:
+    """
+    Place two portrait pages side-by-side on one landscape sheet side.
+    """
     w = float(left_page.mediabox.width)
     h = float(left_page.mediabox.height)
 
@@ -89,12 +114,19 @@ def get_page_or_blank(
     raise ValueError("Page index out of range")
 
 
+def default_output_pdf_path(input_pdf: Path, signature_size: int) -> Path:
+    """
+    Write imposed output into the same folder as the interior PDF by default.
+    """
+    return input_pdf.parent / f"imposed_{signature_size}sig.pdf"
+
+
 def impose(
     input_pdf: Path,
     output_pdf: Path,
     signature_size: int = 16,
     max_end_padding: Optional[int] = None,
-) -> None:
+) -> Tuple[int, int, int]:
     reader = PdfReader(str(input_pdf))
     writer = PdfWriter()
 
@@ -110,7 +142,8 @@ def impose(
 
     if max_end_padding is not None and end_padding > max_end_padding:
         raise ValueError(
-            f"Would need {end_padding} blank end pages, which exceeds --max-end-padding {max_end_padding}"
+            f"Would need {end_padding} blank end pages, which exceeds "
+            f"--max-end-padding {max_end_padding}"
         )
 
     template_page = reader.pages[0]
@@ -123,22 +156,27 @@ def impose(
             back_left_abs = sig_start + back_left_local - 1
             back_right_abs = sig_start + back_right_local - 1
 
-            front_left_page = get_page_or_blank(reader, front_left_abs, padded_total, total_pages, template_page)
-            front_right_page = get_page_or_blank(reader, front_right_abs, padded_total, total_pages, template_page)
-            back_left_page = get_page_or_blank(reader, back_left_abs, padded_total, total_pages, template_page)
-            back_right_page = get_page_or_blank(reader, back_right_abs, padded_total, total_pages, template_page)
+            front_left_page = get_page_or_blank(
+                reader, front_left_abs, padded_total, total_pages, template_page
+            )
+            front_right_page = get_page_or_blank(
+                reader, front_right_abs, padded_total, total_pages, template_page
+            )
+            back_left_page = get_page_or_blank(
+                reader, back_left_abs, padded_total, total_pages, template_page
+            )
+            back_right_page = get_page_or_blank(
+                reader, back_right_abs, padded_total, total_pages, template_page
+            )
 
             writer.add_page(create_sheet_page(front_left_page, front_right_page))
             writer.add_page(create_sheet_page(back_left_page, back_right_page))
 
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
     with open(output_pdf, "wb") as f:
         writer.write(f)
 
-    print(f"Input pages:        {total_pages}")
-    print(f"Signature size:     {signature_size}")
-    print(f"End padding added:  {end_padding}")
-    print(f"Output sheet sides: {len(writer.pages)}")
-    print(f"Wrote:              {output_pdf}")
+    return total_pages, end_padding, len(writer.pages)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -159,21 +197,24 @@ def main(argv=None) -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
 
-    if args.input_pdf and args.output_pdf:
+    if args.input_pdf:
         input_pdf_str = args.input_pdf
         output_pdf_str = args.output_pdf
     else:
         input_pdf_str, output_pdf_str = get_paths_interactively()
 
     input_pdf = Path(input_pdf_str)
-    output_pdf = Path(output_pdf_str)
 
     if not input_pdf.exists():
         print(f"Input PDF not found: {input_pdf}", file=sys.stderr)
         return 2
 
+    output_pdf = Path(output_pdf_str) if output_pdf_str else default_output_pdf_path(
+        input_pdf, args.signature
+    )
+
     try:
-        impose(
+        total_pages, end_padding, output_sheet_sides = impose(
             input_pdf=input_pdf,
             output_pdf=output_pdf,
             signature_size=args.signature,
@@ -182,6 +223,17 @@ def main(argv=None) -> int:
     except Exception as e:
         print(f"Imposition failed: {e}", file=sys.stderr)
         return 3
+
+    print()
+    print("Signature imposition completed successfully.")
+    print(f"Input PDF:         {input_pdf}")
+    print(f"Output folder:     {output_pdf.parent}")
+    print(f"Output PDF:        {output_pdf}")
+    print(f"Input pages:       {total_pages}")
+    print(f"Signature size:    {args.signature}")
+    print(f"End blanks added:  {end_padding}")
+    print(f"Sheet sides total: {output_sheet_sides}")
+    print()
 
     return 0
 
