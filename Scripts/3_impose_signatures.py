@@ -13,10 +13,10 @@ Features:
 Typical workflow:
     1. Run epub_to_pdf.py
     2. This creates something like:
-       C:\\Users\\jonat\\Documents\\Bees_Books\\Running_on_Air_output\\interior.pdf
+       C:\interior.pdf
     3. Run this script on that PDF
     4. It creates:
-       C:\\Users\\jonat\\Documents\\Bees_Books\\Running_on_Air_output\\imposed_16sig.pdf
+       C:\mposed_16sig.pdf
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf._page import PageObject
 
 
-DEFAULT_INPUT_PDF = r"C:\Users\jonat\Documents\Bees_Books\Running_on_Air_output\interior.pdf"
+DEFAULT_INPUT_PDF = r"C\interior.pdf"
 
 
 def safe_name(name: str) -> str:
