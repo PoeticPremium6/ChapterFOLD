@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 """
-Impose a book interior PDF into 2-up printer spreads for signatures.
+Impose a book interior PDF into 2-up printer spreads for folded signatures.
 
-Features:
-- Defaults to 16-page signatures
-- Adds blank pages only at the end
-- Can limit how many blank end pages are allowed
-- Ignores unknown IDE/PyDev arguments
-- Prompts for input/output if needed
-- By default writes output into the same *_output folder as the interior PDF
+Concept:
+- 1 sheet of paper = 4 book pages total
+  (2 on the front, 2 on the back)
+- 4 sheets per signature = 16 book pages per signature
+
+This script lets you choose signatures either by:
+- sheets per signature, or
+- pages per signature
+
+Defaults:
+- 4 sheets per signature
+- 16 pages per signature
+- blank pages added only at the end
+- output written next to the input PDF
 
 Typical workflow:
     1. Run epub_to_pdf.py
     2. This creates something like:
-       C:\interior.pdf
     3. Run this script on that PDF
     4. It creates:
-       C:\mposed_16sig.pdf
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf._page import PageObject
 
 
-DEFAULT_INPUT_PDF = r"C\interior.pdf"
+DEFAULT_SHEETS_PER_SIGNATURE = 4
 
 
 def safe_name(name: str) -> str:
@@ -61,21 +66,56 @@ def next_multiple(n: int, m: int) -> int:
     return ((n + m - 1) // m) * m
 
 
-def signature_sheet_pairs(sig_size: int) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+def pages_from_sheets(sheets_per_signature: int) -> int:
+    if sheets_per_signature <= 0:
+        raise ValueError("Sheets per signature must be greater than 0")
+    return sheets_per_signature * 4
+
+
+def resolve_signature_size(
+    sheets_per_signature: Optional[int],
+    pages_per_signature: Optional[int],
+) -> Tuple[int, int]:
+    """
+    Returns:
+        (sheets_per_signature, pages_per_signature)
+    """
+    if sheets_per_signature is not None and pages_per_signature is not None:
+        expected_pages = pages_from_sheets(sheets_per_signature)
+        if pages_per_signature != expected_pages:
+            raise ValueError(
+                f"Conflicting options: {sheets_per_signature} sheets/signature "
+                f"implies {expected_pages} pages/signature, not {pages_per_signature}"
+            )
+        return sheets_per_signature, pages_per_signature
+
+    if sheets_per_signature is not None:
+        return sheets_per_signature, pages_from_sheets(sheets_per_signature)
+
+    if pages_per_signature is not None:
+        if pages_per_signature <= 0 or pages_per_signature % 4 != 0:
+            raise ValueError("Pages per signature must be a positive multiple of 4")
+        return pages_per_signature // 4, pages_per_signature
+
+    return DEFAULT_SHEETS_PER_SIGNATURE, pages_from_sheets(DEFAULT_SHEETS_PER_SIGNATURE)
+
+
+def signature_sheet_pairs(pages_per_signature: int) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
     """
     Return sheet pairings for one signature.
 
-    For a 16-page signature:
+    Example for 16 pages:
       sheet 1 front: (16, 1), back: (2, 15)
       sheet 2 front: (14, 3), back: (4, 13)
-      ...
+      sheet 3 front: (12, 5), back: (6, 11)
+      sheet 4 front: (10, 7), back: (8, 9)
     """
-    if sig_size % 4 != 0:
-        raise ValueError("Signature size must be a multiple of 4")
+    if pages_per_signature % 4 != 0:
+        raise ValueError("Pages per signature must be a multiple of 4")
 
     sheets = []
     low = 1
-    high = sig_size
+    high = pages_per_signature
 
     while low < high:
         front = (high, low)
@@ -114,17 +154,19 @@ def get_page_or_blank(
     raise ValueError("Page index out of range")
 
 
-def default_output_pdf_path(input_pdf: Path, signature_size: int) -> Path:
-    """
-    Write imposed output into the same folder as the interior PDF by default.
-    """
-    return input_pdf.parent / f"imposed_{signature_size}sig.pdf"
+def default_output_pdf_path(
+    input_pdf: Path,
+    sheets_per_signature: int,
+    pages_per_signature: int,
+) -> Path:
+    return input_pdf.parent / f"imposed_{sheets_per_signature}sheets_{pages_per_signature}pages.pdf"
 
 
 def impose(
     input_pdf: Path,
     output_pdf: Path,
-    signature_size: int = 16,
+    sheets_per_signature: int,
+    pages_per_signature: int,
     max_end_padding: Optional[int] = None,
 ) -> Tuple[int, int, int]:
     reader = PdfReader(str(input_pdf))
@@ -134,10 +176,10 @@ def impose(
     if total_pages == 0:
         raise ValueError("Input PDF has no pages")
 
-    if signature_size % 4 != 0:
-        raise ValueError("Signature size must be a multiple of 4")
+    if pages_per_signature % 4 != 0:
+        raise ValueError("Pages per signature must be a multiple of 4")
 
-    padded_total = next_multiple(total_pages, signature_size)
+    padded_total = next_multiple(total_pages, pages_per_signature)
     end_padding = padded_total - total_pages
 
     if max_end_padding is not None and end_padding > max_end_padding:
@@ -147,9 +189,9 @@ def impose(
         )
 
     template_page = reader.pages[0]
-    per_signature_sheets = signature_sheet_pairs(signature_size)
+    per_signature_sheets = signature_sheet_pairs(pages_per_signature)
 
-    for sig_start in range(1, padded_total + 1, signature_size):
+    for sig_start in range(1, padded_total + 1, pages_per_signature):
         for (front_left_local, front_right_local), (back_left_local, back_right_local) in per_signature_sheets:
             front_left_abs = sig_start + front_left_local - 1
             front_right_abs = sig_start + front_right_local - 1
@@ -183,7 +225,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("input_pdf", nargs="?", help="Interior PDF to impose")
     parser.add_argument("output_pdf", nargs="?", help="Output imposed PDF")
-    parser.add_argument("--signature", type=int, default=16, help="Pages per signature")
+
+    parser.add_argument(
+        "--sheets-per-signature",
+        type=int,
+        default=None,
+        help="Number of folded sheets in each signature (4 sheets = 16 pages)",
+    )
+    parser.add_argument(
+        "--pages-per-signature",
+        type=int,
+        default=None,
+        help="Number of book pages in each signature (must be a multiple of 4)",
+    )
     parser.add_argument(
         "--max-end-padding",
         type=int,
@@ -209,30 +263,42 @@ def main(argv=None) -> int:
         print(f"Input PDF not found: {input_pdf}", file=sys.stderr)
         return 2
 
+    try:
+        sheets_per_signature, pages_per_signature = resolve_signature_size(
+            sheets_per_signature=args.sheets_per_signature,
+            pages_per_signature=args.pages_per_signature,
+        )
+    except Exception as e:
+        print(f"Signature size error: {e}", file=sys.stderr)
+        return 3
+
     output_pdf = Path(output_pdf_str) if output_pdf_str else default_output_pdf_path(
-        input_pdf, args.signature
+        input_pdf, sheets_per_signature, pages_per_signature
     )
 
     try:
         total_pages, end_padding, output_sheet_sides = impose(
             input_pdf=input_pdf,
             output_pdf=output_pdf,
-            signature_size=args.signature,
+            sheets_per_signature=sheets_per_signature,
+            pages_per_signature=pages_per_signature,
             max_end_padding=args.max_end_padding,
         )
     except Exception as e:
         print(f"Imposition failed: {e}", file=sys.stderr)
-        return 3
+        return 4
 
     print()
     print("Signature imposition completed successfully.")
-    print(f"Input PDF:         {input_pdf}")
-    print(f"Output folder:     {output_pdf.parent}")
-    print(f"Output PDF:        {output_pdf}")
-    print(f"Input pages:       {total_pages}")
-    print(f"Signature size:    {args.signature}")
-    print(f"End blanks added:  {end_padding}")
-    print(f"Sheet sides total: {output_sheet_sides}")
+    print(f"Input PDF:            {input_pdf}")
+    print(f"Output folder:        {output_pdf.parent}")
+    print(f"Output PDF:           {output_pdf}")
+    print(f"Input pages:          {total_pages}")
+    print(f"Sheets/signature:     {sheets_per_signature}")
+    print(f"Pages/signature:      {pages_per_signature}")
+    print(f"End blanks added:     {end_padding}")
+    print(f"Output sheet sides:   {output_sheet_sides}")
+    print(f"Physical sheets/sig:  {sheets_per_signature}")
     print()
 
     return 0
