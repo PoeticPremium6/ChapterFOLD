@@ -242,3 +242,17 @@ def impose_pdf(
         end_blanks_added=end_padding,
         output_sheet_sides=len(writer.pages),
     )
+
+print()
+print("Signature imposition completed successfully.")
+print(f"Input PDF:            {result.input_pdf}")
+print(f"Book slug:            {result.book_slug}")
+print(f"Output folder:        {result.output_dir}")
+print(f"Output PDF:           {result.output_pdf}")
+print(f"Input pages:          {result.input_pages}")
+print(f"Sheets/signature:     {result.sheets_per_signature}")
+print(f"Pages/signature:      {result.pages_per_signature}")
+print(f"End blanks added:     {result.end_blanks_added}")
+print(f"Output sheet sides:   {result.output_sheet_sides}")
+print(f"Physical sheets/sig:  {result.sheets_per_signature}")
+print()
