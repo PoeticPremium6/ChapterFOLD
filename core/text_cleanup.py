@@ -33,7 +33,7 @@ def is_scene_break(line: str) -> bool:
 
 def join_dialogue_line_pair(current: str, nxt: str) -> str | None:
     """
-    Join likely dialogue continuations, for example:
+    Join likely dialogue continuations, e.g.
 
     "I don't know,"
     he said.
@@ -46,13 +46,13 @@ def join_dialogue_line_pair(current: str, nxt: str) -> str | None:
     if not current or not nxt:
         return None
 
-    # Common cases: line ends with comma / quote / dash and next line starts lowercase
+    # Line ends like unfinished dialogue / tag continuation
     if re.search(r'[,"\u201d\u2019—-]$', current) and re.match(r"^[a-z(]", nxt):
         return f"{current} {nxt}"
 
-    # Dialogue tag continuation
+    # Dialogue tags or simple continuation lines
     if re.search(r'["\u201d\u2019]$', current) and re.match(
-        r"^(he|she|they|i|we|it|harry|draco|ron|hermione)\b",
+        r"^(he|she|they|i|we|it|you|his|her|their|the)\b",
         nxt,
         flags=re.IGNORECASE,
     ):
@@ -62,9 +62,6 @@ def join_dialogue_line_pair(current: str, nxt: str) -> str | None:
 
 
 def clean_block_lines(lines: list[str], settings: CleanupSettings) -> list[str]:
-    """
-    Clean a sequence of non-blank lines belonging to one paragraph-ish block.
-    """
     if not lines:
         return []
 
