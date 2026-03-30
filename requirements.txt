@@ -4,3 +4,4 @@ lxml
 weasyprint
 pypdf
 pytest
+python-docx
