@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-Core service for converting EPUB into a print-ready interior PDF.
-Designed to be imported by a future UI app or used from a thin CLI wrapper.
-"""
-
 from __future__ import annotations
 
 import html
@@ -15,6 +10,8 @@ from typing import List, Tuple
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from ebooklib import ITEM_DOCUMENT, epub
+
+from core.naming import build_book_slug, interior_pdf_name, output_dir_for_book
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -56,6 +53,7 @@ class EpubToPdfResult:
     input_epub: Path
     output_dir: Path
     output_pdf: Path
+    book_slug: str
     detected_title: str
     detected_author: str
     used_title: str
@@ -64,12 +62,6 @@ class EpubToPdfResult:
 
 def cm(value: float) -> str:
     return f"{value:.3f}cm"
-
-
-def safe_name(name: str) -> str:
-    name = re.sub(r"\s+", "_", name.strip())
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
-    return name or "book"
 
 
 def get_metadata(book: epub.EpubBook) -> Tuple[str, str]:
@@ -337,11 +329,20 @@ def build_html_document(
     """
 
 
-def default_output_pdf_path(epub_path: Path) -> Path:
-    book_stem = safe_name(epub_path.stem)
-    output_dir = epub_path.parent / f"{book_stem}_output"
+def default_output_pdf_path(
+    epub_path: Path,
+    *,
+    used_title: str,
+    used_author: str,
+) -> Path:
+    book_slug = build_book_slug(
+        title=used_title,
+        author=used_author,
+        fallback_stem=epub_path.stem,
+    )
+    output_dir = output_dir_for_book(epub_path.parent, book_slug)
     output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir / "interior.pdf"
+    return output_dir / interior_pdf_name(book_slug)
 
 
 def ensure_weasyprint_available() -> None:
@@ -387,13 +388,29 @@ def process_epub_to_pdf(
         settings=settings,
     )
 
-    output_pdf = Path(output_pdf_path) if output_pdf_path else default_output_pdf_path(epub_path)
+    book_slug = build_book_slug(
+        title=used_title,
+        author=used_author,
+        fallback_stem=epub_path.stem,
+    )
+
+    output_pdf = (
+        Path(output_pdf_path)
+        if output_pdf_path
+        else default_output_pdf_path(
+            epub_path,
+            used_title=used_title,
+            used_author=used_author,
+        )
+    )
+
     render_pdf(html_doc, output_pdf)
 
     return EpubToPdfResult(
         input_epub=epub_path,
         output_dir=output_pdf.parent,
         output_pdf=output_pdf,
+        book_slug=book_slug,
         detected_title=epub_content.detected_title,
         detected_author=epub_content.detected_author,
         used_title=used_title,
