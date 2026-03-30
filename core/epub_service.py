@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+from core.text_cleanup import CleanupSettings, clean_text_block
 
 import html
 import re
@@ -138,6 +139,23 @@ def sanitize_section_html(fragment: str, drop_notes: bool = False) -> str:
 
     for p in soup.find_all("p"):
         text = p.get_text(" ", strip=False)
+
+        cleaned = clean_text_block(
+            text,
+            CleanSettings(
+                join_soft_wrapped_lines=True,
+                join_dialogue_continuations=True,
+                collapse_extra_blank_lines=True,
+                preseve_scene_breaks=True,
+            ),
+        )
+
+        if cleaned.strip():
+            p.clear()
+            p.append(cleaned)
+        else:
+            p.decompose()
+        
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r"\n\s*\n+", "\n", text)
         if text.strip():
