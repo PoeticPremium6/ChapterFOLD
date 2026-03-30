@@ -233,10 +233,6 @@ python scripts\impose_signatures.py "C:\Running_on_Air_output\interior.pdf" --ma
 * `4 sheets per signature`
 * `16 pages per signature`
 
-## Why I made this
-
-I wanted something practical. Book-binding is a traditional artform, but it can use some help from modern technology. I wanted a way to take digital texts, especially EPUBs and fanfiction, and turn them into something I could realistically print, fold, gather, and sew without fighting several different tools along the way.
-
 
 ## Intended use
 
