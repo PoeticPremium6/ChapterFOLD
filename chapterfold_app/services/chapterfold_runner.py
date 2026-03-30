@@ -8,6 +8,10 @@ from core.epub_service import (
     CleanupSettings,
     EpubToPdfResult,
     LayoutSettings,
+    build_book_slug,
+    editable_docx_name,
+    interior_pdf_name,
+    load_epub_content,
     process_epub_to_pdf,
 )
 
@@ -68,6 +72,23 @@ def run_processing(
     cleanup_settings = build_cleanup_settings(variant)
     layout_settings = LayoutSettings()
 
+    epub_content = load_epub_content(input_epub)
+    used_title = epub_content.detected_title
+    used_author = epub_content.detected_author
+
+    book_slug = build_book_slug(
+        title=used_title,
+        author=used_author,
+        fallback_stem=input_epub.stem,
+    )
+
+    variant_slug = variant.replace(" ", "-").replace("_", "-")
+    pdf_name = interior_pdf_name(f"{book_slug}__{variant_slug}")
+    docx_name = editable_docx_name(f"{book_slug}__{variant_slug}")
+
+    output_pdf_path = output_dir / pdf_name
+    output_docx_path = output_dir / docx_name
+
     log("Starting ChapterFOLD processing...")
     log(f"Input EPUB: {input_epub}")
     log(f"Output folder: {output_dir}")
@@ -76,11 +97,11 @@ def run_processing(
 
     result = process_epub_to_pdf(
         epub_path=input_epub,
-        output_pdf_path=None,
-        output_docx_path=None,
+        output_pdf_path=output_pdf_path,
+        output_docx_path=output_docx_path if export_docx else None,
         export_docx=export_docx,
-        title=None,
-        author=None,
+        title=used_title,
+        author=used_author,
         settings=layout_settings,
         cleanup_settings=cleanup_settings,
     )
