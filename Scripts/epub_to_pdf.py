@@ -88,6 +88,7 @@ def main(argv=None) -> int:
     print(f"Detected author:  {result.detected_author}")
     print(f"Used title:       {result.used_title}")
     print(f"Used author:      {result.used_author}")
+    print(f"Book slug:        {result.book_slug}")
     print(f"Output folder:    {result.output_dir}")
     print(f"Output PDF:       {result.output_pdf}")
     print()
