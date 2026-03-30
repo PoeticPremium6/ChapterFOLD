@@ -3,3 +3,4 @@ ebooklib
 lxml
 weasyprint
 pypdf
+pytest
