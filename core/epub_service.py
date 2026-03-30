@@ -22,7 +22,6 @@ except Exception as e:
 else:
     WEASYPRINT_IMPORT_ERROR = None
 
-
 DEFAULT_FONT_STACK = '"Garamond", "EB Garamond", "Cormorant Garamond", serif'
 
 
@@ -44,6 +43,7 @@ class LayoutSettings:
 class CleanupSettings:
     join_soft_wrapped_lines: bool = True
     join_dialogue_continuations: bool = True
+    merge_dialogue_paragraphs: bool = False
     collapse_extra_blank_lines: bool = True
     preserve_scene_breaks: bool = True
 
@@ -72,6 +72,19 @@ SCENE_BREAK_RE = re.compile(
     r"^\s*(\*\s*){3,}$|^\s*#{3,}\s*$|^\s*-\s*-\s*-\s*$|^\s*~\s*~\s*~\s*$"
 )
 
+DIALOGUE_TAG_START_RE = re.compile(
+    r"^(?:"
+    r"he|she|they|i|we|it|you|his|her|their|the|"
+    r"said|asked|whispered|murmured|replied|answered|shouted|yelled|"
+    r"cried|called|snapped|hissed|muttered|breathed|added|continued|"
+    r"harry|ron|hermione|draco|ginny|luna|neville|snape|remus|sirius|"
+    r"malfoy|potter|granger|he'd|she'd|they'd|he'll|she'll|they'll"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+
+LOWER_CONTINUATION_RE = re.compile(r'^[a-z(\[\u2014\-]')
+
 
 def cm(value: float) -> str:
     return f"{value:.3f}cm"
@@ -96,13 +109,10 @@ def build_book_slug(
         parts.append(slugify(author))
     if title:
         parts.append(slugify(title))
-
     if parts:
         return "__".join(parts)
-
     if fallback_stem:
         return slugify(fallback_stem)
-
     return "book"
 
 
@@ -123,6 +133,7 @@ def normalize_line_endings(text: str) -> str:
 
 
 def normalize_spaces(text: str) -> str:
+    text = text.replace("\xa0", " ")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r" *\n *", "\n", text)
     return text
@@ -135,18 +146,13 @@ def is_scene_break(line: str) -> bool:
 def join_dialogue_line_pair(current: str, nxt: str) -> str | None:
     current = current.rstrip()
     nxt = nxt.lstrip()
-
     if not current or not nxt:
         return None
 
-    if re.search(r'[,"\u201d\u2019—-]$', current) and re.match(r"^[a-z(]", nxt):
+    if re.search(r'[,\u2014\-]$|["\u201d\u2019]$', current) and LOWER_CONTINUATION_RE.match(nxt):
         return f"{current} {nxt}"
 
-    if re.search(r'["\u201d\u2019]$', current) and re.match(
-        r"^(he|she|they|i|we|it|you|his|her|their|the)\b",
-        nxt,
-        flags=re.IGNORECASE,
-    ):
+    if re.search(r'["\u201d\u2019]$', current) and DIALOGUE_TAG_START_RE.match(nxt):
         return f"{current} {nxt}"
 
     return None
@@ -158,17 +164,14 @@ def clean_block_lines(lines: list[str], settings: CleanupSettings) -> list[str]:
 
     result: list[str] = []
     i = 0
-
     while i < len(lines):
         current = lines[i].strip()
-
         if settings.join_dialogue_continuations and i + 1 < len(lines):
             joined = join_dialogue_line_pair(current, lines[i + 1])
             if joined is not None:
                 result.append(joined)
                 i += 2
                 continue
-
         result.append(current)
         i += 1
 
@@ -182,11 +185,10 @@ def clean_block_lines(lines: list[str], settings: CleanupSettings) -> list[str]:
 
 def clean_text_block(text: str, settings: CleanupSettings | None = None) -> str:
     settings = settings or CleanupSettings()
-
     text = normalize_line_endings(text)
     text = normalize_spaces(text)
-
     lines = text.split("\n")
+
     output_blocks: list[str] = []
     current_block: list[str] = []
 
@@ -200,10 +202,8 @@ def clean_text_block(text: str, settings: CleanupSettings | None = None) -> str:
         current_block = []
 
     blank_run = 0
-
     for raw_line in lines:
         line = raw_line.strip()
-
         if not line:
             blank_run += 1
             flush_current_block()
@@ -212,7 +212,6 @@ def clean_text_block(text: str, settings: CleanupSettings | None = None) -> str:
             continue
 
         blank_run = 0
-
         if settings.preserve_scene_breaks and is_scene_break(line):
             flush_current_block()
             output_blocks.append(line)
@@ -223,10 +222,8 @@ def clean_text_block(text: str, settings: CleanupSettings | None = None) -> str:
     flush_current_block()
 
     cleaned = "\n".join(output_blocks)
-
     if settings.collapse_extra_blank_lines:
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-
     return cleaned.strip()
 
 
@@ -253,7 +250,6 @@ def load_epub_content(epub_path: Path) -> EpubContent:
     for item in book.get_items_of_type(ITEM_DOCUMENT):
         raw = item.get_content()
         soup = BeautifulSoup(raw, "xml")
-
         for bad in soup(["script", "style"]):
             bad.decompose()
 
@@ -277,52 +273,158 @@ def load_epub_content(epub_path: Path) -> EpubContent:
     )
 
 
+def _selectors_to_drop(drop_notes: bool) -> list[str]:
+    selectors = [".landmark", ".actions", ".download", "nav"]
+    if drop_notes:
+        selectors.extend([
+            ".preface",
+            ".notes",
+            ".endnotes",
+            "#notes",
+            "#work_endnotes",
+        ])
+    return selectors
+
+
+def _drop_unwanted_nodes(soup: BeautifulSoup, *, drop_notes: bool) -> None:
+    for selector in _selectors_to_drop(drop_notes):
+        for el in soup.select(selector):
+            el.decompose()
+
+
+def _raw_paragraph_items_from_fragment(fragment: str, *, drop_notes: bool = False) -> list[tuple[str, str]]:
+    soup = BeautifulSoup(fragment, "xml")
+    _drop_unwanted_nodes(soup, drop_notes=drop_notes)
+    body = soup.find("body") or soup
+
+    items: list[tuple[str, str]] = []
+    block_tags = {"p", "blockquote", "div", "li"}
+    scene_tags = {"hr"}
+
+    for node in body.descendants:
+        if not getattr(node, "name", None):
+            continue
+
+        if node.name in scene_tags:
+            items.append(("scene", "***"))
+            continue
+
+        if node.name not in block_tags:
+            continue
+
+        if node.find(block_tags):
+            # Only keep leaf-ish block nodes to avoid duplicating nested text.
+            continue
+
+        text = node.get_text("\n", strip=False)
+        cleaned = clean_text_block(text)
+        if cleaned.strip():
+            for chunk in [part.strip() for part in cleaned.split("\n\n") if part.strip()]:
+                if is_scene_break(chunk):
+                    items.append(("scene", "***"))
+                else:
+                    items.append(("p", chunk))
+
+    deduped: list[tuple[str, str]] = []
+    previous = None
+    for item in items:
+        if item == previous and item[0] == "scene":
+            continue
+        deduped.append(item)
+        previous = item
+    return deduped
+
+
+def should_merge_dialogue_paragraphs(current: str, nxt: str) -> bool:
+    current = current.strip()
+    nxt = nxt.strip()
+    if not current or not nxt:
+        return False
+
+    if is_scene_break(current) or is_scene_break(nxt):
+        return False
+
+    # Strong signal: quoted speech followed by a dialogue tag split into a new paragraph.
+    if re.search(r'["\u201d\u2019]$', current) and DIALOGUE_TAG_START_RE.match(nxt):
+        return True
+
+    # Continuation after comma, dash, or open-ended quote.
+    if re.search(r'[,;:\u2014\-]$|["\u201d\u2019]$', current) and LOWER_CONTINUATION_RE.match(nxt):
+        return True
+
+    # Small follow-up fragment like: "..." Ron asks.
+    if len(nxt) <= 80 and (
+        DIALOGUE_TAG_START_RE.match(nxt)
+        or LOWER_CONTINUATION_RE.match(nxt)
+    ):
+        return True
+
+    return False
+
+
+def merge_adjacent_paragraph_items(
+    items: list[tuple[str, str]],
+    settings: CleanupSettings,
+) -> list[tuple[str, str]]:
+    if not settings.merge_dialogue_paragraphs:
+        return items
+
+    merged: list[tuple[str, str]] = []
+    for kind, text in items:
+        if (
+            merged
+            and kind == "p"
+            and merged[-1][0] == "p"
+            and should_merge_dialogue_paragraphs(merged[-1][1], text)
+        ):
+            merged[-1] = ("p", f"{merged[-1][1].rstrip()} {text.lstrip()}")
+        else:
+            merged.append((kind, text))
+    return merged
+
+
+def extract_clean_items_from_html(
+    fragment: str,
+    *,
+    drop_notes: bool = False,
+    cleanup_settings: CleanupSettings | None = None,
+) -> list[tuple[str, str]]:
+    cleanup_settings = cleanup_settings or CleanupSettings()
+    raw_items = _raw_paragraph_items_from_fragment(fragment, drop_notes=drop_notes)
+
+    normalized: list[tuple[str, str]] = []
+    for kind, text in raw_items:
+        if kind == "scene":
+            if cleanup_settings.preserve_scene_breaks:
+                normalized.append(("scene", "***"))
+            continue
+
+        cleaned = clean_text_block(text, cleanup_settings)
+        if cleaned.strip():
+            normalized.append(("p", cleaned.strip()))
+
+    return merge_adjacent_paragraph_items(normalized, cleanup_settings)
+
+
 def sanitize_section_html(
     fragment: str,
     *,
     drop_notes: bool = False,
     cleanup_settings: CleanupSettings | None = None,
 ) -> str:
-    soup = BeautifulSoup(fragment, "xml")
+    items = extract_clean_items_from_html(
+        fragment,
+        drop_notes=drop_notes,
+        cleanup_settings=cleanup_settings,
+    )
 
-    selectors_to_drop = [
-        ".landmark",
-        ".actions",
-        ".download",
-        "nav",
-    ]
-
-    if drop_notes:
-        selectors_to_drop.extend(
-            [
-                ".preface",
-                ".notes",
-                ".endnotes",
-                "#notes",
-                "#work_endnotes",
-            ]
-        )
-
-    for selector in selectors_to_drop:
-        for el in soup.select(selector):
-            el.decompose()
-
-    cleanup_settings = cleanup_settings or CleanupSettings()
-
-    for p in soup.find_all("p"):
-        text = p.get_text("\n", strip=False)
-        cleaned = clean_text_block(text, cleanup_settings)
-
-        if cleaned.strip():
-            p.clear()
-            p.append(cleaned)
+    html_parts: list[str] = []
+    for kind, text in items:
+        if kind == "scene":
+            html_parts.append('<hr class="scene-break" />')
         else:
-            p.decompose()
-
-    body = soup.find("body")
-    if body:
-        return "".join(str(x) for x in body.contents)
-    return "".join(str(x) for x in soup.contents)
+            html_parts.append(f"<p>{html.escape(text)}</p>")
+    return "\n".join(html_parts)
 
 
 def extract_clean_text_from_html(
@@ -331,40 +433,19 @@ def extract_clean_text_from_html(
     drop_notes: bool = False,
     cleanup_settings: CleanupSettings | None = None,
 ) -> str:
-    soup = BeautifulSoup(fragment, "xml")
+    items = extract_clean_items_from_html(
+        fragment,
+        drop_notes=drop_notes,
+        cleanup_settings=cleanup_settings,
+    )
 
-    selectors_to_drop = [
-        ".landmark",
-        ".actions",
-        ".download",
-        "nav",
-    ]
-
-    if drop_notes:
-        selectors_to_drop.extend(
-            [
-                ".preface",
-                ".notes",
-                ".endnotes",
-                "#notes",
-                "#work_endnotes",
-            ]
-        )
-
-    for selector in selectors_to_drop:
-        for el in soup.select(selector):
-            el.decompose()
-
-    cleanup_settings = cleanup_settings or CleanupSettings()
-    paragraphs: list[str] = []
-
-    for p in soup.find_all("p"):
-        text = p.get_text("\n", strip=False)
-        cleaned = clean_text_block(text, cleanup_settings)
-        if cleaned.strip():
-            paragraphs.append(cleaned.strip())
-
-    return "\n\n".join(paragraphs).strip()
+    parts: list[str] = []
+    for kind, text in items:
+        if kind == "scene":
+            parts.append("***")
+        else:
+            parts.append(text)
+    return "\n\n".join(parts).strip()
 
 
 def build_clean_text_sections(
@@ -374,7 +455,6 @@ def build_clean_text_sections(
     cleanup_settings: CleanupSettings | None = None,
 ) -> List[Tuple[str, str]]:
     cleaned_sections: List[Tuple[str, str]] = []
-
     for heading, raw_html in sections:
         cleaned_text = extract_clean_text_from_html(
             raw_html,
@@ -383,7 +463,6 @@ def build_clean_text_sections(
         )
         if cleaned_text.strip():
             cleaned_sections.append((heading, cleaned_text))
-
     return cleaned_sections
 
 
@@ -406,19 +485,13 @@ def build_section_blocks(
             continue
 
         heading_html = (
-            f"<h1 class='chapter-title'>{html.escape(heading)}</h1>" if heading else ""
+            f'<h1 class="chapter-title">{html.escape(heading)}</h1>' if heading else ""
         )
-
         chapter_class = "chapter first-body-chapter" if first_real_section else "chapter"
         first_real_section = False
 
         blocks.append(
-            f"""
-            <section class="{chapter_class}">
-              {heading_html}
-              {cleaned}
-            </section>
-            """
+            f'<section class="{chapter_class}">{heading_html}{cleaned}</section>'
         )
 
     return blocks
@@ -426,111 +499,113 @@ def build_section_blocks(
 
 def build_css(settings: LayoutSettings) -> str:
     return f"""
-    @page {{
-      size: {cm(settings.trim_width_cm)} {cm(settings.trim_height_cm)};
-      margin-top: {cm(settings.margin_top_cm)};
-      margin-bottom: {cm(settings.margin_bottom_cm)};
-      @bottom-center {{
-        content: counter(page);
-        font-size: 9pt;
-      }}
-    }}
+@page {{
+  size: {cm(settings.trim_width_cm)} {cm(settings.trim_height_cm)};
+  margin-top: {cm(settings.margin_top_cm)};
+  margin-bottom: {cm(settings.margin_bottom_cm)};
+  @bottom-center {{
+    content: counter(page);
+    font-size: 9pt;
+  }}
+}}
 
-    @page :right {{
-      margin-left: {cm(settings.margin_inside_cm)};
-      margin-right: {cm(settings.margin_outside_cm)};
-    }}
+@page :right {{
+  margin-left: {cm(settings.margin_inside_cm)};
+  margin-right: {cm(settings.margin_outside_cm)};
+}}
 
-    @page :left {{
-      margin-left: {cm(settings.margin_outside_cm)};
-      margin-right: {cm(settings.margin_inside_cm)};
-    }}
+@page :left {{
+  margin-left: {cm(settings.margin_outside_cm)};
+  margin-right: {cm(settings.margin_inside_cm)};
+}}
 
-    html {{
-      font-size: {settings.font_size_pt}pt;
-    }}
+html {{
+  font-size: {settings.font_size_pt}pt;
+}}
 
-    body {{
-      margin: 0;
-      padding: 0;
-      color: #111;
-      font-family: {settings.font_family};
-      line-height: {settings.line_height};
-      -weasy-bookmark-level: none;
-    }}
+body {{
+  margin: 0;
+  padding: 0;
+  color: #111;
+  font-family: {settings.font_family};
+  line-height: {settings.line_height};
+  -weasy-bookmark-level: none;
+}}
 
-    .title-page {{
-      break-after: page;
-      min-height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-    }}
+.title-page {{
+  break-after: page;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}}
 
-    .title-wrap h1 {{
-      margin: 0 0 0.45em 0;
-      font-size: {settings.font_size_pt * 2.0:.2f}pt;
-      line-height: 1.15;
-    }}
+.title-wrap h1 {{
+  margin: 0 0 0.45em 0;
+  font-size: {settings.font_size_pt * 2.0:.2f}pt;
+  line-height: 1.15;
+}}
 
-    .title-wrap .author {{
-      margin: 0;
-      font-size: {settings.font_size_pt * 1.15:.2f}pt;
-    }}
+.title-wrap .author {{
+  margin: 0;
+  font-size: {settings.font_size_pt * 1.15:.2f}pt;
+}}
 
-    .blank-page {{
-      break-after: page;
-    }}
+.blank-page {{
+  break-after: page;
+}}
 
-    .first-body-chapter {{
-      break-before: right;
-    }}
+.first-body-chapter {{
+  break-before: right;
+}}
 
-    .chapter {{
-      break-before: page;
-    }}
+.chapter {{
+  break-before: page;
+}}
 
-    .first-body-chapter.chapter {{
-      break-before: right;
-    }}
+.first-body-chapter.chapter {{
+  break-before: right;
+}}
 
-    .chapter-title {{
-      text-align: center;
-      margin: 0 0 1.8em 0;
-      font-size: {settings.font_size_pt * 1.45:.2f}pt;
-      page-break-after: avoid;
-    }}
+.chapter-title {{
+  text-align: center;
+  margin: 0 0 1.8em 0;
+  font-size: {settings.font_size_pt * 1.45:.2f}pt;
+  page-break-after: avoid;
+}}
 
-    p {{
-      margin: 0 0 0.65em 0;
-      text-align: justify;
-      text-indent: 0;
-      orphans: 2;
-      widows: 2;
-    }}
+p {{
+  margin: 0 0 0.65em 0;
+  text-align: justify;
+  text-indent: 0;
+  orphans: 2;
+  widows: 2;
+}}
 
-    .chapter p + p {{
-      text-indent: 1.2em;
-    }}
+.chapter p + p {{
+  text-indent: 1.2em;
+}}
 
-    h1, h2, h3, h4 {{
-      page-break-after: avoid;
-    }}
+h1, h2, h3, h4 {{
+  page-break-after: avoid;
+}}
 
-    em {{
-      font-style: italic;
-    }}
+em {{
+  font-style: italic;
+}}
 
-    strong {{
-      font-weight: bold;
-    }}
+strong {{
+  font-weight: bold;
+}}
 
-    hr {{
-      margin: 1.2em auto;
-      width: 25%;
-    }}
-    """
+hr, .scene-break {{
+  margin: 1.2em auto;
+  width: 25%;
+  border: 0;
+  border-top: 1px solid #666;
+}}
+"""
 
 
 def build_html_document(
@@ -543,36 +618,35 @@ def build_html_document(
 ) -> str:
     blocks = [
         f"""
-        <section class="title-page">
-          <div class="title-wrap">
-            <h1>{html.escape(title)}</h1>
-            <p class="author">{html.escape(author)}</p>
-          </div>
-        </section>
-        """,
-        '<section class="blank-page" aria-hidden="true"></section>',
+<section class=\"title-page\">
+  <div class=\"title-wrap\">
+    <h1>{html.escape(title)}</h1>
+    <p class=\"author\">{html.escape(author)}</p>
+  </div>
+</section>
+<div class=\"blank-page\"></div>
+""",
         *build_section_blocks(
             sections,
             drop_notes=settings.drop_notes,
             cleanup_settings=cleanup_settings,
         ),
     ]
-
     css = build_css(settings)
 
     return f"""
-    <!doctype html>
-    <html lang="en">
-    <head>
-      <meta charset="utf-8">
-      <title>{html.escape(title)}</title>
-      <style>{css}</style>
-    </head>
-    <body>
-      {''.join(blocks)}
-    </body>
-    </html>
-    """
+<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <title>{html.escape(title)}</title>
+  <style>{css}</style>
+</head>
+<body>
+{''.join(blocks)}
+</body>
+</html>
+"""
 
 
 def default_output_pdf_path(
@@ -636,7 +710,10 @@ def export_clean_docx(
 
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         for para in paragraphs:
-            doc.add_paragraph(para)
+            if is_scene_break(para) or para == "***":
+                doc.add_paragraph("***")
+            else:
+                doc.add_paragraph(para)
 
     doc.save(str(output_path))
     return output_path
@@ -659,7 +736,6 @@ def process_epub_to_pdf(
 
     settings = settings or LayoutSettings()
     cleanup_settings = cleanup_settings or CleanupSettings()
-
     epub_content = load_epub_content(epub_path)
     if not epub_content.sections:
         raise ValueError("No readable content sections found in EPUB.")
