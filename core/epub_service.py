@@ -85,7 +85,6 @@ DIALOGUE_TAG_START_RE = re.compile(
 
 LOWER_CONTINUATION_RE = re.compile(r'^[a-z(\[\u2014\-]')
 
-
 def cm(value: float) -> str:
     return f"{value:.3f}cm"
 
