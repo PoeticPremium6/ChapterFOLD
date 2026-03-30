@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import traceback
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
 
@@ -31,8 +32,8 @@ class Worker(QObject):
     def run(self) -> None:
         try:
             result = run_processing(
-                input_epub=__import__("pathlib").Path(self.input_epub),
-                output_dir=__import__("pathlib").Path(self.output_dir),
+                input_epub=Path(self.input_epub),
+                output_dir=Path(self.output_dir),
                 variant=self.variant,
                 export_docx=self.export_docx,
                 log_callback=self.log.emit,
