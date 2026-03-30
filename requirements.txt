@@ -5,3 +5,4 @@ weasyprint
 pypdf
 pytest
 python-docx
+PySide6>=6.7
