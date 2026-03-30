@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+from core.text_cleanup import CleanupSettings
 
 import argparse
 import sys
@@ -38,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--line-height", type=float, default=1.35)
     parser.add_argument("--font-family", default=DEFAULT_FONT_STACK)
     parser.add_argument("--drop-notes", action="store_true")
+    parser.add_argument("--export-docx", action="store_true", help="Also create an editable DOCX")
+    parser.add_argument("--docx-out", default=None, help="Custom DOCX output path")
+
+    parser.add_argument("--no-join-soft-wraps", action="store_true")
+    parser.add_argument("--no-join-dialogue", action="store_true")
     return parser
 
 
