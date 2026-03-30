@@ -1,0 +1,33 @@
+=== Simple dialogue merge ===
+<html><body>
+<p>"I don't know,"</p>
+<p>she said quietly.</p>
+</body></html>
+
+=== New speaker split ===
+<html><body>
+<p>"Where are you going?" Harry asked.</p>
+<p>"Out," said Draco.</p>
+</body></html>
+
+=== Screenshot-style case ===
+<html><body>
+<p>"Had a chat to Malfoy's solicitor?" Ron asks shrewdly. His time as an Auror
+has cultivated a surprising amount of cunning.</p>
+
+<p>"Well," Hermione says, "a law used to exist, stating that those who knew the
+whereabouts of felons — but didn't report them straight away — could be
+arrested for hindering prosecution. But the law has long since been abolished."</p>
+
+<p>"So," Harry says carefully, "Draco disappeared half an hour before his
+appointment with the solicitor, who would have told him that there would be
+no legal consequences for him if he turned Lucius over to the authorities."</p>
+
+<p>"Maybe he did turn Lucius in," Ron says suddenly.</p>
+
+<p>"What?"</p>
+
+<p>"Remember when we caught Lucius Malfoy? Everyone wanted to be the
+one to track down the last Death Eater, but in the end, it all came down to an
+anonymous tip."</p>
+</body></html>
