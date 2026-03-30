@@ -10,10 +10,7 @@ from typing import List, Tuple
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from ebooklib import ITEM_DOCUMENT, epub
-
-from core.docx_service import export_clean_docx
-from core.naming import build_book_slug, interior_pdf_name, output_dir_for_book
-from core.text_cleanup import CleanupSettings, clean_text_block
+from docx import Document
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -44,6 +41,14 @@ class LayoutSettings:
 
 
 @dataclass
+class CleanupSettings:
+    join_soft_wrapped_lines: bool = True
+    join_dialogue_continuations: bool = True
+    collapse_extra_blank_lines: bool = True
+    preserve_scene_breaks: bool = True
+
+
+@dataclass
 class EpubContent:
     detected_title: str
     detected_author: str
@@ -63,8 +68,166 @@ class EpubToPdfResult:
     used_author: str
 
 
+SCENE_BREAK_RE = re.compile(
+    r"^\s*(\*\s*){3,}$|^\s*#{3,}\s*$|^\s*-\s*-\s*-\s*$|^\s*~\s*~\s*~\s*$"
+)
+
+
 def cm(value: float) -> str:
     return f"{value:.3f}cm"
+
+
+def slugify(value: str) -> str:
+    value = value.strip().lower()
+    value = re.sub(r"[^\w\s-]", "", value, flags=re.UNICODE)
+    value = re.sub(r"[\s_-]+", "-", value)
+    value = re.sub(r"-{2,}", "-", value)
+    return value.strip("-") or "book"
+
+
+def build_book_slug(
+    *,
+    title: str | None = None,
+    author: str | None = None,
+    fallback_stem: str | None = None,
+) -> str:
+    parts = []
+    if author:
+        parts.append(slugify(author))
+    if title:
+        parts.append(slugify(title))
+
+    if parts:
+        return "__".join(parts)
+
+    if fallback_stem:
+        return slugify(fallback_stem)
+
+    return "book"
+
+
+def output_dir_for_book(base_dir: Path, book_slug: str) -> Path:
+    return base_dir / f"{book_slug}_output"
+
+
+def interior_pdf_name(book_slug: str) -> str:
+    return f"{book_slug}__interior.pdf"
+
+
+def editable_docx_name(book_slug: str) -> str:
+    return f"{book_slug}__editable.docx"
+
+
+def normalize_line_endings(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def normalize_spaces(text: str) -> str:
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    return text
+
+
+def is_scene_break(line: str) -> bool:
+    return bool(SCENE_BREAK_RE.match(line.strip()))
+
+
+def join_dialogue_line_pair(current: str, nxt: str) -> str | None:
+    current = current.rstrip()
+    nxt = nxt.lstrip()
+
+    if not current or not nxt:
+        return None
+
+    if re.search(r'[,"\u201d\u2019—-]$', current) and re.match(r"^[a-z(]", nxt):
+        return f"{current} {nxt}"
+
+    if re.search(r'["\u201d\u2019]$', current) and re.match(
+        r"^(he|she|they|i|we|it|you|his|her|their|the)\b",
+        nxt,
+        flags=re.IGNORECASE,
+    ):
+        return f"{current} {nxt}"
+
+    return None
+
+
+def clean_block_lines(lines: list[str], settings: CleanupSettings) -> list[str]:
+    if not lines:
+        return []
+
+    result: list[str] = []
+    i = 0
+
+    while i < len(lines):
+        current = lines[i].strip()
+
+        if settings.join_dialogue_continuations and i + 1 < len(lines):
+            joined = join_dialogue_line_pair(current, lines[i + 1])
+            if joined is not None:
+                result.append(joined)
+                i += 2
+                continue
+
+        result.append(current)
+        i += 1
+
+    if settings.join_soft_wrapped_lines:
+        merged = " ".join(x for x in result if x.strip())
+        merged = re.sub(r" {2,}", " ", merged).strip()
+        return [merged] if merged else []
+
+    return result
+
+
+def clean_text_block(text: str, settings: CleanupSettings | None = None) -> str:
+    settings = settings or CleanupSettings()
+
+    text = normalize_line_endings(text)
+    text = normalize_spaces(text)
+
+    lines = text.split("\n")
+    output_blocks: list[str] = []
+    current_block: list[str] = []
+
+    def flush_current_block() -> None:
+        nonlocal current_block
+        if not current_block:
+            return
+        cleaned_lines = clean_block_lines(current_block, settings)
+        if cleaned_lines:
+            output_blocks.append("\n".join(cleaned_lines))
+        current_block = []
+
+    blank_run = 0
+
+    for raw_line in lines:
+        line = raw_line.strip()
+
+        if not line:
+            blank_run += 1
+            flush_current_block()
+            if not settings.collapse_extra_blank_lines or blank_run == 1:
+                output_blocks.append("")
+            continue
+
+        blank_run = 0
+
+        if settings.preserve_scene_breaks and is_scene_break(line):
+            flush_current_block()
+            output_blocks.append(line)
+            continue
+
+        current_block.append(line)
+
+    flush_current_block()
+
+    cleaned = "\n".join(output_blocks)
+
+    if settings.collapse_extra_blank_lines:
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+    return cleaned.strip()
 
 
 def get_metadata(book: epub.EpubBook) -> Tuple[str, str]:
@@ -193,7 +356,6 @@ def extract_clean_text_from_html(
             el.decompose()
 
     cleanup_settings = cleanup_settings or CleanupSettings()
-
     paragraphs: list[str] = []
 
     for p in soup.find_all("p"):
@@ -430,7 +592,7 @@ def default_output_pdf_path(
 
 
 def default_output_docx_path(output_dir: Path, book_slug: str) -> Path:
-    return output_dir / f"{book_slug}__editable.docx"
+    return output_dir / editable_docx_name(book_slug)
 
 
 def ensure_weasyprint_available() -> None:
@@ -446,6 +608,38 @@ def render_pdf(html_doc: str, output_pdf_path: Path) -> None:
     ensure_weasyprint_available()
     output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
     HTML(string=html_doc).write_pdf(str(output_pdf_path))
+
+
+def export_clean_docx(
+    *,
+    title: str,
+    author: str,
+    sections: List[Tuple[str, str]],
+    output_path: str | Path,
+) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+    doc.add_heading(title, level=0)
+    if author.strip():
+        doc.add_paragraph(author)
+
+    first_section = True
+    for heading, text in sections:
+        if not first_section:
+            doc.add_page_break()
+        first_section = False
+
+        if heading.strip():
+            doc.add_heading(heading, level=1)
+
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        for para in paragraphs:
+            doc.add_paragraph(para)
+
+    doc.save(str(output_path))
+    return output_path
 
 
 def process_epub_to_pdf(
