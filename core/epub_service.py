@@ -529,6 +529,21 @@ p {
   text-indent: 0;
 }
 """
+    elif mode == "indented-compact":
+        paragraph_css = """
+p {
+  margin: 0;
+  text-align: justify;
+  text-indent: 0;
+  orphans: 2;
+  widows: 2;
+}
+
+.chapter p + p {
+  text-indent: 1.2em;
+  margin-top: 0;
+}
+"""
     else:
         paragraph_css = """
 p {
