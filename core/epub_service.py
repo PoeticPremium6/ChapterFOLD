@@ -37,6 +37,7 @@ class LayoutSettings:
     line_height: float = 1.35
     font_family: str = DEFAULT_FONT_STACK
     drop_notes: bool = False
+    uniform_paragraph_spacing: bool = False
 
 
 @dataclass
