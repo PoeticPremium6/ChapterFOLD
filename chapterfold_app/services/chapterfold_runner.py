@@ -190,6 +190,8 @@ def describe_spacing_mode(mode: str) -> str:
         return "Uniform (no paragraph gap, no indents)"
     if normalized == "no-indents":
         return "No indents (keep paragraph spacing)"
+    if normalized == "indented-compact":
+        return "Indented compact (minimal paragraph gap + indents)"
     return "Traditional (paragraph spacing + indents)"
 
 
