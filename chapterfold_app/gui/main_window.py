@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(1040, 800)
+        self.resize(1040, 820)
 
         self.thread: QThread | None = None
         self.worker: Worker | None = None
@@ -49,12 +49,18 @@ class MainWindow(QMainWindow):
         self.spacing_mode_combo.addItem("Indented compact (minimal paragraph gap + indents)", "indented-compact")
         self.spacing_mode_combo.addItem("Uniform (no paragraph gap, no indents)", "uniform")
 
+        self.margin_preset_combo = QComboBox()
+        self.margin_preset_combo.addItem("Standard", "standard")
+        self.margin_preset_combo.addItem("Compact", "compact")
+        self.margin_preset_combo.addItem("Wide", "wide")
+        self.margin_preset_combo.addItem("Large print friendly", "large-print")
+
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
 
         self.results_box = QTextEdit()
         self.results_box.setReadOnly(True)
-        self.results_box.setMaximumHeight(260)
+        self.results_box.setMaximumHeight(280)
 
         self.before_preview = QTextEdit()
         self.before_preview.setReadOnly(True)
@@ -114,10 +120,13 @@ class MainWindow(QMainWindow):
         form.addWidget(QLabel("Paragraph spacing:"), 3, 0)
         form.addWidget(self.spacing_mode_combo, 3, 1)
 
-        form.addWidget(QLabel("Options:"), 4, 0)
+        form.addWidget(QLabel("Margins:"), 4, 0)
+        form.addWidget(self.margin_preset_combo, 4, 1)
+
+        form.addWidget(QLabel("Options:"), 5, 0)
         options_layout = QVBoxLayout()
         options_layout.addWidget(self.export_docx_checkbox)
-        form.addLayout(options_layout, 4, 1)
+        form.addLayout(options_layout, 5, 1)
 
         layout.addLayout(form)
 
@@ -201,6 +210,7 @@ class MainWindow(QMainWindow):
         self.variant_combo.setEnabled(not busy)
         self.export_docx_checkbox.setEnabled(not busy)
         self.spacing_mode_combo.setEnabled(not busy)
+        self.margin_preset_combo.setEnabled(not busy)
 
     def _reset_results_ui(self) -> None:
         self.results_box.clear()
@@ -225,6 +235,7 @@ class MainWindow(QMainWindow):
         variant = self.variant_combo.currentData()
         export_docx = self.export_docx_checkbox.isChecked()
         paragraph_spacing_mode = self.spacing_mode_combo.currentData()
+        margin_preset = self.margin_preset_combo.currentData()
 
         if not input_path:
             QMessageBox.warning(self, "Missing input", "Please choose an EPUB file.")
@@ -251,6 +262,7 @@ class MainWindow(QMainWindow):
             variant=variant,
             export_docx=export_docx,
             paragraph_spacing_mode=paragraph_spacing_mode,
+            margin_preset=margin_preset,
         )
         self.worker.moveToThread(self.thread)
 
@@ -286,6 +298,7 @@ class MainWindow(QMainWindow):
             f"Author: {payload.get('author', '')}",
             f"Cleanup mode: {payload.get('variant_label', payload.get('variant', ''))}",
             f"Paragraph spacing mode: {payload.get('paragraph_spacing_mode_label', '')}",
+            f"Margins: {payload.get('margin_preset_label', '')}",
             "",
             f"Input EPUB: {payload.get('input_epub', '')}",
             f"Output PDF: {payload.get('output_pdf', '')}",
@@ -355,7 +368,7 @@ class MainWindow(QMainWindow):
             self.preview_index_label.setText("0 / 0")
             self.before_preview.setPlainText("No text cleanup preview samples were found.")
             self.after_preview.setPlainText(
-                "This can still be normal if the visible difference is mainly layout, spacing, or pagination."
+                "This can still be normal if the visible difference is mainly layout, spacing, margins, or pagination."
             )
             self.prev_preview_btn.setEnabled(False)
             self.next_preview_btn.setEnabled(False)
