@@ -37,7 +37,7 @@ class LayoutSettings:
     line_height: float = 1.35
     font_family: str = DEFAULT_FONT_STACK
     drop_notes: bool = False
-    uniform_paragraph_spacing: bool = False
+    paragraph_spacing_mode: str = "traditional"
 
 
 @dataclass
@@ -498,7 +498,9 @@ def build_section_blocks(
 
 
 def build_css(settings: LayoutSettings) -> str:
-    if settings.uniform_paragraph_spacing:
+    mode = (settings.paragraph_spacing_mode or "traditional").strip().lower()
+
+    if mode == "uniform":
         paragraph_css = """
 p {
   margin: 0;
@@ -511,6 +513,20 @@ p {
 .chapter p + p {
   text-indent: 0;
   margin-top: 0;
+}
+"""
+    elif mode == "no-indents":
+        paragraph_css = """
+p {
+  margin: 0 0 0.65em 0;
+  text-align: justify;
+  text-indent: 0;
+  orphans: 2;
+  widows: 2;
+}
+
+.chapter p + p {
+  text-indent: 0;
 }
 """
     else:
