@@ -29,7 +29,7 @@ def build_cleanup_settings(variant: str) -> CleanupSettings:
         preserve_scene_breaks=True,
     )
 
-    paragraph_dialogue_merge = CleanupSettings(
+    dialogue_merge = CleanupSettings(
         join_soft_wrapped_lines=True,
         join_dialogue_continuations=True,
         merge_dialogue_paragraphs=True,
@@ -39,13 +39,13 @@ def build_cleanup_settings(variant: str) -> CleanupSettings:
     )
 
     aggressive = replace(
-        paragraph_dialogue_merge,
+        dialogue_merge,
         aggressive_mode=True,
     )
 
     variants = {
         "standard": standard,
-        "paragraph-dialogue-merge": paragraph_dialogue_merge,
+        "paragraph-dialogue-merge": dialogue_merge,
         "aggressive-cleanup": aggressive,
     }
 
@@ -73,6 +73,52 @@ def describe_spacing_mode(mode: str) -> str:
     if normalized == "indented-compact":
         return "Indented compact (minimal paragraph gap + indents)"
     return "Traditional (paragraph spacing + indents)"
+
+
+def build_layout_settings(
+    *,
+    paragraph_spacing_mode: str,
+    margin_preset: str,
+) -> LayoutSettings:
+    layout = LayoutSettings(
+        paragraph_spacing_mode=paragraph_spacing_mode,
+    )
+
+    preset = (margin_preset or "standard").strip().lower()
+
+    if preset == "compact":
+        layout.margin_top_cm = 1.2
+        layout.margin_bottom_cm = 1.2
+        layout.margin_inside_cm = 1.5
+        layout.margin_outside_cm = 0.8
+    elif preset == "wide":
+        layout.margin_top_cm = 1.8
+        layout.margin_bottom_cm = 1.8
+        layout.margin_inside_cm = 2.1
+        layout.margin_outside_cm = 1.2
+    elif preset == "large-print":
+        layout.margin_top_cm = 2.0
+        layout.margin_bottom_cm = 2.0
+        layout.margin_inside_cm = 2.2
+        layout.margin_outside_cm = 1.4
+    else:
+        layout.margin_top_cm = 1.5
+        layout.margin_bottom_cm = 1.5
+        layout.margin_inside_cm = 1.8
+        layout.margin_outside_cm = 1.0
+
+    return layout
+
+
+def describe_margin_preset(margin_preset: str) -> str:
+    preset = (margin_preset or "standard").strip().lower()
+    mapping = {
+        "standard": "Standard",
+        "compact": "Compact",
+        "wide": "Wide",
+        "large-print": "Large print friendly",
+    }
+    return mapping.get(preset, margin_preset)
 
 
 def build_raw_preview_cleanup_settings() -> CleanupSettings:
@@ -118,6 +164,7 @@ def build_file_stem(
     title: str,
     variant: str,
     spacing_mode: str,
+    margin_preset: str,
 ) -> str:
     parts = [
         safe_filename_component(author),
@@ -125,9 +172,11 @@ def build_file_stem(
         safe_filename_component(describe_variant(variant)),
     ]
 
-    spacing_label = describe_spacing_mode(spacing_mode)
     if spacing_mode and spacing_mode != "traditional":
-        parts.append(safe_filename_component(spacing_label))
+        parts.append(safe_filename_component(describe_spacing_mode(spacing_mode)))
+
+    if margin_preset and margin_preset != "standard":
+        parts.append(safe_filename_component(describe_margin_preset(margin_preset)))
 
     return " - ".join(parts)
 
@@ -140,12 +189,14 @@ def build_output_paths(
     used_author: str,
     variant: str,
     spacing_mode: str,
+    margin_preset: str,
 ) -> tuple[Path, Path, str]:
     stem = build_file_stem(
         author=used_author or input_epub.stem,
         title=used_title or input_epub.stem,
         variant=variant,
         spacing_mode=spacing_mode,
+        margin_preset=margin_preset,
     )
 
     output_pdf_path = output_dir / f"{stem} - Interior.pdf"
@@ -200,6 +251,7 @@ def render_baseline_pdf(
     used_title: str,
     used_author: str,
     spacing_mode: str,
+    margin_preset: str,
     settings: LayoutSettings,
     log: LogCallback | None = None,
 ) -> tuple[Path, int, float | None]:
@@ -213,6 +265,7 @@ def render_baseline_pdf(
         used_author=used_author,
         variant=baseline_variant,
         spacing_mode=spacing_mode,
+        margin_preset=margin_preset,
     )
 
     if log:
@@ -241,6 +294,7 @@ def run_processing(
     variant: str,
     export_docx: bool,
     paragraph_spacing_mode: str,
+    margin_preset: str,
     log_callback: LogCallback | None = None,
 ) -> dict:
     if not input_epub.exists():
@@ -253,8 +307,9 @@ def run_processing(
             log_callback(message)
 
     cleanup_settings = build_cleanup_settings(variant)
-    layout_settings = LayoutSettings(
+    layout_settings = build_layout_settings(
         paragraph_spacing_mode=paragraph_spacing_mode,
+        margin_preset=margin_preset,
     )
 
     log("Reading EPUB metadata...")
@@ -269,12 +324,14 @@ def run_processing(
         used_author=used_author,
         variant=variant,
         spacing_mode=paragraph_spacing_mode,
+        margin_preset=margin_preset,
     )
 
     log(f"Detected title: {used_title}")
     log(f"Detected author: {used_author}")
     log(f"Selected variant: {describe_variant(variant)}")
     log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
+    log(f"Margin preset: {describe_margin_preset(margin_preset)}")
     log("Building text cleanup preview samples...")
 
     preview_samples = build_preview_samples(
@@ -294,6 +351,7 @@ def run_processing(
             used_title=used_title,
             used_author=used_author,
             spacing_mode=paragraph_spacing_mode,
+            margin_preset=margin_preset,
             settings=layout_settings,
             log=log,
         )
@@ -346,4 +404,6 @@ def run_processing(
         "size_delta_mb_vs_baseline": size_delta_mb,
         "paragraph_spacing_mode": paragraph_spacing_mode,
         "paragraph_spacing_mode_label": describe_spacing_mode(paragraph_spacing_mode),
+        "margin_preset": margin_preset,
+        "margin_preset_label": describe_margin_preset(margin_preset),
     }
