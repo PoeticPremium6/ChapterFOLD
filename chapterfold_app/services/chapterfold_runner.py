@@ -148,14 +148,6 @@ def build_output_paths(
     return output_pdf_path, output_docx_path, full_slug
 
 
-def format_signed_int(value: int) -> str:
-    return f"{value:+d}"
-
-
-def format_signed_float(value: float) -> str:
-    return f"{value:+.2f}"
-
-
 def render_baseline_pdf(
     *,
     input_epub: Path,
@@ -201,6 +193,7 @@ def run_processing(
     output_dir: Path,
     variant: str,
     export_docx: bool,
+    uniform_paragraph_spacing: bool,
     log_callback: LogCallback | None = None,
 ) -> dict:
     if not input_epub.exists():
@@ -213,7 +206,9 @@ def run_processing(
             log_callback(message)
 
     cleanup_settings = build_cleanup_settings(variant)
-    layout_settings = LayoutSettings()
+    layout_settings = LayoutSettings(
+        uniform_paragraph_spacing=uniform_paragraph_spacing,
+    )
 
     log("Reading EPUB metadata...")
     epub_content = load_epub_content(input_epub)
@@ -231,6 +226,10 @@ def run_processing(
     log(f"Detected title: {used_title}")
     log(f"Detected author: {used_author}")
     log(f"Selected variant: {variant}")
+    log(
+        "Paragraph spacing mode: "
+        + ("Uniform (no paragraph gap)" if uniform_paragraph_spacing else "Traditional")
+    )
     log("Building text cleanup preview samples...")
 
     preview_samples = build_preview_samples(
@@ -283,10 +282,10 @@ def run_processing(
 
     if baseline_pages is not None:
         log(f"Baseline PDF pages: {baseline_pages}")
-        log(f"Page delta vs baseline: {format_signed_int(page_delta)}")
+        log(f"Page delta vs baseline: {page_delta:+d}")
 
     if size_delta_mb is not None:
-        log(f"PDF size delta vs baseline: {format_signed_float(size_delta_mb)} MB")
+        log(f"PDF size delta vs baseline: {size_delta_mb:+.2f} MB")
 
     if result.output_docx:
         log(f"DOCX created: {result.output_docx}")
@@ -311,4 +310,5 @@ def run_processing(
         "baseline_pdf_size_mb": baseline_size_mb,
         "page_delta_vs_baseline": page_delta,
         "size_delta_mb_vs_baseline": size_delta_mb,
+        "uniform_paragraph_spacing": uniform_paragraph_spacing,
     }
