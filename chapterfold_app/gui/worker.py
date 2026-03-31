@@ -21,14 +21,14 @@ class Worker(QObject):
         output_dir: str,
         variant: str,
         export_docx: bool,
-        uniform_paragraph_spacing: bool,
+        paragraph_spacing_mode: str,
     ) -> None:
         super().__init__()
         self.input_epub = input_epub
         self.output_dir = output_dir
         self.variant = variant
         self.export_docx = export_docx
-        self.uniform_paragraph_spacing = uniform_paragraph_spacing
+        self.paragraph_spacing_mode = paragraph_spacing_mode
 
     @Slot()
     def run(self) -> None:
@@ -38,7 +38,7 @@ class Worker(QObject):
                 output_dir=Path(self.output_dir),
                 variant=self.variant,
                 export_docx=self.export_docx,
-                uniform_paragraph_spacing=self.uniform_paragraph_spacing,
+                paragraph_spacing_mode=self.paragraph_spacing_mode,
                 log_callback=self.log.emit,
             )
             self.success.emit(payload)
