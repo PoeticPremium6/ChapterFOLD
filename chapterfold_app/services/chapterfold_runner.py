@@ -148,6 +148,53 @@ def build_output_paths(
     return output_pdf_path, output_docx_path, full_slug
 
 
+def format_signed_int(value: int) -> str:
+    return f"{value:+d}"
+
+
+def format_signed_float(value: float) -> str:
+    return f"{value:+.2f}"
+
+
+def render_baseline_pdf(
+    *,
+    input_epub: Path,
+    output_dir: Path,
+    used_title: str,
+    used_author: str,
+    settings: LayoutSettings,
+    log: LogCallback | None = None,
+) -> tuple[Path, int, float | None]:
+    baseline_variant = "standard"
+    baseline_cleanup = build_cleanup_settings(baseline_variant)
+
+    baseline_pdf_path, _, _ = build_output_paths(
+        input_epub=input_epub,
+        output_dir=output_dir,
+        used_title=used_title,
+        used_author=used_author,
+        variant=baseline_variant,
+    )
+
+    if log:
+        log("Rendering baseline PDF for comparison...")
+
+    process_epub_to_pdf(
+        epub_path=input_epub,
+        output_pdf_path=baseline_pdf_path,
+        output_docx_path=None,
+        export_docx=False,
+        title=used_title,
+        author=used_author,
+        settings=settings,
+        cleanup_settings=baseline_cleanup,
+    )
+
+    baseline_pages = pdf_page_count(baseline_pdf_path)
+    baseline_size_mb = file_size_mb(baseline_pdf_path)
+    return baseline_pdf_path, baseline_pages, baseline_size_mb
+
+
 def run_processing(
     *,
     input_epub: Path,
@@ -183,8 +230,8 @@ def run_processing(
 
     log(f"Detected title: {used_title}")
     log(f"Detected author: {used_author}")
-    log(f"Variant: {variant}")
-    log("Building preview samples...")
+    log(f"Selected variant: {variant}")
+    log("Building text cleanup preview samples...")
 
     preview_samples = build_preview_samples(
         sections=epub_content.sections,
@@ -192,7 +239,21 @@ def run_processing(
         max_samples=3,
     )
 
-    log("Rendering output files...")
+    baseline_pdf_path = None
+    baseline_pages = None
+    baseline_size_mb = None
+
+    if variant != "standard":
+        baseline_pdf_path, baseline_pages, baseline_size_mb = render_baseline_pdf(
+            input_epub=input_epub,
+            output_dir=output_dir,
+            used_title=used_title,
+            used_author=used_author,
+            settings=layout_settings,
+            log=log,
+        )
+
+    log("Rendering selected output files...")
     result: EpubToPdfResult = process_epub_to_pdf(
         epub_path=input_epub,
         output_pdf_path=output_pdf_path,
@@ -210,8 +271,22 @@ def run_processing(
     docx_size_mb = file_size_mb(result.output_docx) if result.output_docx else None
     output_pdf_pages = pdf_page_count(result.output_pdf)
 
+    page_delta = None
+    size_delta_mb = None
+    if baseline_pages is not None:
+        page_delta = output_pdf_pages - baseline_pages
+    if baseline_size_mb is not None and pdf_size_mb is not None:
+        size_delta_mb = pdf_size_mb - baseline_size_mb
+
     log(f"PDF created: {result.output_pdf}")
-    log(f"PDF pages: {output_pdf_pages}")
+    log(f"Selected PDF pages: {output_pdf_pages}")
+
+    if baseline_pages is not None:
+        log(f"Baseline PDF pages: {baseline_pages}")
+        log(f"Page delta vs baseline: {format_signed_int(page_delta)}")
+
+    if size_delta_mb is not None:
+        log(f"PDF size delta vs baseline: {format_signed_float(size_delta_mb)} MB")
 
     if result.output_docx:
         log(f"DOCX created: {result.output_docx}")
@@ -231,4 +306,9 @@ def run_processing(
         "output_pdf_pages": output_pdf_pages,
         "preview_samples": preview_samples,
         "preview_sample_count": len(preview_samples),
+        "baseline_pdf": str(baseline_pdf_path) if baseline_pdf_path else "",
+        "baseline_pdf_pages": baseline_pages,
+        "baseline_pdf_size_mb": baseline_size_mb,
+        "page_delta_vs_baseline": page_delta,
+        "size_delta_mb_vs_baseline": size_delta_mb,
     }
