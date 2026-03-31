@@ -3,18 +3,21 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QFrame,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -23,11 +26,149 @@ from PySide6.QtWidgets import (
 from gui.worker import Worker
 
 
+APP_STYLESHEET = """
+QMainWindow {
+    background: #f5f6f8;
+}
+
+QWidget {
+    font-size: 11pt;
+    color: #222222;
+}
+
+QGroupBox {
+    background: #ffffff;
+    border: 1px solid #d9dde3;
+    border-radius: 10px;
+    margin-top: 12px;
+    font-weight: 600;
+    padding-top: 10px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+    color: #2d3748;
+}
+
+QLabel#titleLabel {
+    font-size: 22pt;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+QLabel#subtitleLabel {
+    font-size: 10pt;
+    color: #667085;
+}
+
+QLabel#statusLabel {
+    background: #eef2f7;
+    border: 1px solid #d9dde3;
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: #334155;
+    font-weight: 500;
+}
+
+QLineEdit,
+QComboBox,
+QTextEdit {
+    background: #ffffff;
+    border: 1px solid #cfd6df;
+    border-radius: 8px;
+    padding: 8px 10px;
+    selection-background-color: #cfe3ff;
+}
+
+QLineEdit:focus,
+QComboBox:focus,
+QTextEdit:focus {
+    border: 1px solid #6b9cff;
+}
+
+QComboBox {
+    min-height: 22px;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #cfd6df;
+    border-radius: 8px;
+    padding: 8px 14px;
+    min-height: 18px;
+}
+
+QPushButton:hover {
+    background: #f3f6fb;
+}
+
+QPushButton:pressed {
+    background: #e9eef7;
+}
+
+QPushButton:disabled {
+    color: #97a3b6;
+    background: #f7f8fa;
+}
+
+QPushButton#primaryButton {
+    background: #1f6feb;
+    color: white;
+    border: 1px solid #1f6feb;
+    font-weight: 600;
+}
+
+QPushButton#primaryButton:hover {
+    background: #1a62d0;
+}
+
+QPushButton#primaryButton:pressed {
+    background: #1656b8;
+}
+
+QTextEdit#resultsBox {
+    background: #fbfcfe;
+}
+
+QTextEdit#beforePreview,
+QTextEdit#afterPreview {
+    background: #ffffff;
+}
+
+QFrame#divider {
+    background: #d9dde3;
+    max-height: 1px;
+}
+
+QCheckBox {
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+}
+
+QLabel.sectionHint {
+    color: #667085;
+    font-size: 10pt;
+}
+"""
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(1040, 820)
+        self.resize(1160, 860)
+        self.setStyleSheet(APP_STYLESHEET)
 
         self.thread: QThread | None = None
         self.worker: Worker | None = None
@@ -57,28 +198,46 @@ class MainWindow(QMainWindow):
 
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
+        self.log_box.setMinimumHeight(150)
 
         self.results_box = QTextEdit()
+        self.results_box.setObjectName("resultsBox")
         self.results_box.setReadOnly(True)
         self.results_box.setMaximumHeight(280)
 
         self.before_preview = QTextEdit()
+        self.before_preview.setObjectName("beforePreview")
         self.before_preview.setReadOnly(True)
 
         self.after_preview = QTextEdit()
+        self.after_preview.setObjectName("afterPreview")
         self.after_preview.setReadOnly(True)
+
+        self.title_label = QLabel("ChapterFOLD")
+        self.title_label.setObjectName("titleLabel")
+
+        self.subtitle_label = QLabel(
+            "Convert EPUBs into cleaner print-ready PDF and DOCX interiors."
+        )
+        self.subtitle_label.setObjectName("subtitleLabel")
 
         self.preview_heading_label = QLabel("Text preview sample: none")
         self.preview_index_label = QLabel("0 / 0")
-        self.status_label = QLabel("Ready")
+
+        self.status_label = QLabel("Ready to process an EPUB")
+        self.status_label.setObjectName("statusLabel")
 
         self.browse_input_btn = QPushButton("Browse...")
         self.browse_output_btn = QPushButton("Browse...")
         self.process_btn = QPushButton("Process EPUB")
+        self.process_btn.setObjectName("primaryButton")
+
         self.open_output_btn = QPushButton("Open Output Folder")
         self.open_output_btn.setEnabled(False)
+
         self.open_pdf_btn = QPushButton("Open PDF")
         self.open_pdf_btn.setEnabled(False)
+
         self.open_docx_btn = QPushButton("Open DOCX")
         self.open_docx_btn.setEnabled(False)
 
@@ -103,71 +262,153 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        layout = QVBoxLayout(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(14)
 
-        form = QGridLayout()
-        form.addWidget(QLabel("Input EPUB:"), 0, 0)
-        form.addWidget(self.input_edit, 0, 1)
-        form.addWidget(self.browse_input_btn, 0, 2)
+        header_layout = QVBoxLayout()
+        header_layout.setSpacing(2)
+        header_layout.addWidget(self.title_label)
+        header_layout.addWidget(self.subtitle_label)
+        root.addLayout(header_layout)
 
-        form.addWidget(QLabel("Output folder:"), 1, 0)
-        form.addWidget(self.output_edit, 1, 1)
-        form.addWidget(self.browse_output_btn, 1, 2)
+        root.addWidget(self.status_label)
 
-        form.addWidget(QLabel("Cleanup mode:"), 2, 0)
-        form.addWidget(self.variant_combo, 2, 1)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(14)
 
-        form.addWidget(QLabel("Paragraph spacing:"), 3, 0)
-        form.addWidget(self.spacing_mode_combo, 3, 1)
+        top_row.addWidget(self._build_book_group(), 3)
+        top_row.addWidget(self._build_cleanup_group(), 2)
 
-        form.addWidget(QLabel("Margins:"), 4, 0)
-        form.addWidget(self.margin_preset_combo, 4, 1)
+        root.addLayout(top_row)
 
-        form.addWidget(QLabel("Options:"), 5, 0)
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        action_row.addWidget(self.open_output_btn)
+        action_row.addWidget(self.open_pdf_btn)
+        action_row.addWidget(self.open_docx_btn)
+        action_row.addStretch()
+        action_row.addWidget(self.process_btn)
+        root.addLayout(action_row)
+
+        root.addWidget(self._build_results_group())
+        root.addWidget(self._build_preview_group(), 1)
+        root.addWidget(self._build_log_group())
+
+    def _build_book_group(self) -> QGroupBox:
+        group = QGroupBox("Book")
+        layout = QGridLayout(group)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(10)
+
+        input_hint = QLabel("Choose the source EPUB and where outputs should be saved.")
+        input_hint.setProperty("class", "sectionHint")
+        input_hint.setWordWrap(True)
+
+        layout.addWidget(input_hint, 0, 0, 1, 3)
+
+        layout.addWidget(QLabel("Input EPUB"), 1, 0)
+        layout.addWidget(self.input_edit, 1, 1)
+        layout.addWidget(self.browse_input_btn, 1, 2)
+
+        layout.addWidget(QLabel("Output folder"), 2, 0)
+        layout.addWidget(self.output_edit, 2, 1)
+        layout.addWidget(self.browse_output_btn, 2, 2)
+
+        layout.setColumnStretch(1, 1)
+        return group
+
+    def _build_cleanup_group(self) -> QGroupBox:
+        group = QGroupBox("Cleanup and layout")
+        layout = QGridLayout(group)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(10)
+
+        hint = QLabel("Choose cleanup intensity, paragraph style, and margin preset.")
+        hint.setProperty("class", "sectionHint")
+        hint.setWordWrap(True)
+
+        layout.addWidget(hint, 0, 0, 1, 2)
+
+        layout.addWidget(QLabel("Cleanup mode"), 1, 0)
+        layout.addWidget(self.variant_combo, 1, 1)
+
+        layout.addWidget(QLabel("Paragraph spacing"), 2, 0)
+        layout.addWidget(self.spacing_mode_combo, 2, 1)
+
+        layout.addWidget(QLabel("Margins"), 3, 0)
+        layout.addWidget(self.margin_preset_combo, 3, 1)
+
+        layout.addWidget(QLabel("Options"), 4, 0)
         options_layout = QVBoxLayout()
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(6)
         options_layout.addWidget(self.export_docx_checkbox)
-        form.addLayout(options_layout, 5, 1)
+        layout.addLayout(options_layout, 4, 1)
 
-        layout.addLayout(form)
+        layout.setColumnStretch(1, 1)
+        return group
 
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.open_output_btn)
-        buttons.addWidget(self.open_pdf_btn)
-        buttons.addWidget(self.open_docx_btn)
-        buttons.addStretch()
-        buttons.addWidget(self.process_btn)
-        layout.addLayout(buttons)
+    def _build_results_group(self) -> QGroupBox:
+        group = QGroupBox("Results")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
 
-        layout.addWidget(self.status_label)
-        layout.addWidget(QLabel("Results"))
+        hint = QLabel("Summary of the generated files, layout impact, and comparison stats.")
+        hint.setProperty("class", "sectionHint")
+        hint.setWordWrap(True)
+
+        layout.addWidget(hint)
         layout.addWidget(self.results_box)
+        return group
 
-        preview_header = QHBoxLayout()
-        preview_header.addWidget(QLabel("Text Cleanup Preview"))
-        preview_header.addStretch()
-        preview_header.addWidget(self.preview_heading_label)
-        preview_header.addSpacing(12)
-        preview_header.addWidget(self.prev_preview_btn)
-        preview_header.addWidget(self.next_preview_btn)
-        preview_header.addWidget(self.preview_index_label)
-        layout.addLayout(preview_header)
+    def _build_preview_group(self) -> QGroupBox:
+        group = QGroupBox("Text cleanup preview")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
 
-        preview_layout = QHBoxLayout()
+        top = QHBoxLayout()
+        top.addWidget(self.preview_heading_label)
+        top.addStretch()
+        top.addWidget(self.prev_preview_btn)
+        top.addWidget(self.next_preview_btn)
+        top.addWidget(self.preview_index_label)
 
-        before_layout = QVBoxLayout()
-        before_layout.addWidget(QLabel("Before"))
-        before_layout.addWidget(self.before_preview)
+        layout.addLayout(top)
 
-        after_layout = QVBoxLayout()
-        after_layout.addWidget(QLabel("After"))
-        after_layout.addWidget(self.after_preview)
+        preview_row = QHBoxLayout()
+        preview_row.setSpacing(12)
 
-        preview_layout.addLayout(before_layout)
-        preview_layout.addLayout(after_layout)
-        layout.addLayout(preview_layout)
+        before_col = QVBoxLayout()
+        before_label = QLabel("Before")
+        before_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        before_col.addWidget(before_label)
+        before_col.addWidget(self.before_preview)
 
-        layout.addWidget(QLabel("Log"))
+        after_col = QVBoxLayout()
+        after_label = QLabel("After")
+        after_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        after_col.addWidget(after_label)
+        after_col.addWidget(self.after_preview)
+
+        preview_row.addLayout(before_col, 1)
+        preview_row.addLayout(after_col, 1)
+
+        layout.addLayout(preview_row)
+        return group
+
+    def _build_log_group(self) -> QGroupBox:
+        group = QGroupBox("Processing log")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+
+        hint = QLabel("Detailed processing messages and diagnostics.")
+        hint.setProperty("class", "sectionHint")
+        hint.setWordWrap(True)
+
+        layout.addWidget(hint)
         layout.addWidget(self.log_box)
+        return group
 
     def _connect_signals(self) -> None:
         self.browse_input_btn.clicked.connect(self._browse_input)
