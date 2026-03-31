@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -10,10 +11,7 @@ from core.epub_service import (
     CleanupSettings,
     EpubToPdfResult,
     LayoutSettings,
-    build_book_slug,
-    editable_docx_name,
     extract_clean_text_from_html,
-    interior_pdf_name,
     load_epub_content,
     process_epub_to_pdf,
 )
@@ -26,27 +24,29 @@ def build_cleanup_settings(variant: str) -> CleanupSettings:
         join_soft_wrapped_lines=True,
         join_dialogue_continuations=True,
         merge_dialogue_paragraphs=False,
+        aggressive_mode=False,
         collapse_extra_blank_lines=True,
         preserve_scene_breaks=True,
     )
 
-    aggressive = CleanupSettings(
+    paragraph_dialogue_merge = CleanupSettings(
         join_soft_wrapped_lines=True,
         join_dialogue_continuations=True,
-        merge_dialogue_paragraphs=False,
+        merge_dialogue_paragraphs=True,
+        aggressive_mode=False,
         collapse_extra_blank_lines=True,
         preserve_scene_breaks=True,
     )
 
-    paragraph_dialogue_merge = replace(
-        aggressive,
-        merge_dialogue_paragraphs=True,
+    aggressive = replace(
+        paragraph_dialogue_merge,
+        aggressive_mode=True,
     )
 
     variants = {
         "standard": standard,
-        "aggressive-cleanup": aggressive,
         "paragraph-dialogue-merge": paragraph_dialogue_merge,
+        "aggressive-cleanup": aggressive,
     }
 
     if variant not in variants:
@@ -55,11 +55,32 @@ def build_cleanup_settings(variant: str) -> CleanupSettings:
     return variants[variant]
 
 
+def describe_variant(variant: str) -> str:
+    mapping = {
+        "standard": "Standard Cleanup",
+        "paragraph-dialogue-merge": "Dialogue Merge",
+        "aggressive-cleanup": "Aggressive Cleanup",
+    }
+    return mapping.get(variant, variant)
+
+
+def describe_spacing_mode(mode: str) -> str:
+    normalized = (mode or "traditional").strip().lower()
+    if normalized == "uniform":
+        return "Uniform (no paragraph gap, no indents)"
+    if normalized == "no-indents":
+        return "No indents (keep paragraph spacing)"
+    if normalized == "indented-compact":
+        return "Indented compact (minimal paragraph gap + indents)"
+    return "Traditional (paragraph spacing + indents)"
+
+
 def build_raw_preview_cleanup_settings() -> CleanupSettings:
     return CleanupSettings(
         join_soft_wrapped_lines=False,
         join_dialogue_continuations=False,
         merge_dialogue_paragraphs=False,
+        aggressive_mode=False,
         collapse_extra_blank_lines=False,
         preserve_scene_breaks=True,
     )
@@ -81,6 +102,56 @@ def trim_preview_text(text: str, limit: int = 1400) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+def safe_filename_component(text: str) -> str:
+    text = (text or "").strip()
+    text = re.sub(r'[<>:"/\\|?*]+', "", text)
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip(" .")
+    return text or "Unknown"
+
+
+def build_file_stem(
+    *,
+    author: str,
+    title: str,
+    variant: str,
+    spacing_mode: str,
+) -> str:
+    parts = [
+        safe_filename_component(author),
+        safe_filename_component(title),
+        safe_filename_component(describe_variant(variant)),
+    ]
+
+    spacing_label = describe_spacing_mode(spacing_mode)
+    if spacing_mode and spacing_mode != "traditional":
+        parts.append(safe_filename_component(spacing_label))
+
+    return " - ".join(parts)
+
+
+def build_output_paths(
+    *,
+    input_epub: Path,
+    output_dir: Path,
+    used_title: str,
+    used_author: str,
+    variant: str,
+    spacing_mode: str,
+) -> tuple[Path, Path, str]:
+    stem = build_file_stem(
+        author=used_author or input_epub.stem,
+        title=used_title or input_epub.stem,
+        variant=variant,
+        spacing_mode=spacing_mode,
+    )
+
+    output_pdf_path = output_dir / f"{stem} - Interior.pdf"
+    output_docx_path = output_dir / f"{stem} - Editable.docx"
+
+    return output_pdf_path, output_docx_path, stem
 
 
 def build_preview_samples(
@@ -122,35 +193,13 @@ def build_preview_samples(
     return samples
 
 
-def build_output_paths(
-    *,
-    input_epub: Path,
-    output_dir: Path,
-    used_title: str,
-    used_author: str,
-    variant: str,
-) -> tuple[Path, Path, str]:
-    book_slug = build_book_slug(
-        title=used_title,
-        author=used_author,
-        fallback_stem=input_epub.stem,
-    )
-
-    variant_slug = variant.replace(" ", "-").replace("_", "-")
-    full_slug = f"{book_slug}__{variant_slug}"
-
-    output_pdf_path = output_dir / interior_pdf_name(full_slug)
-    output_docx_path = output_dir / editable_docx_name(full_slug)
-
-    return output_pdf_path, output_docx_path, full_slug
-
-
 def render_baseline_pdf(
     *,
     input_epub: Path,
     output_dir: Path,
     used_title: str,
     used_author: str,
+    spacing_mode: str,
     settings: LayoutSettings,
     log: LogCallback | None = None,
 ) -> tuple[Path, int, float | None]:
@@ -163,6 +212,7 @@ def render_baseline_pdf(
         used_title=used_title,
         used_author=used_author,
         variant=baseline_variant,
+        spacing_mode=spacing_mode,
     )
 
     if log:
@@ -182,17 +232,6 @@ def render_baseline_pdf(
     baseline_pages = pdf_page_count(baseline_pdf_path)
     baseline_size_mb = file_size_mb(baseline_pdf_path)
     return baseline_pdf_path, baseline_pages, baseline_size_mb
-
-
-def describe_spacing_mode(mode: str) -> str:
-    normalized = (mode or "traditional").strip().lower()
-    if normalized == "uniform":
-        return "Uniform (no paragraph gap, no indents)"
-    if normalized == "no-indents":
-        return "No indents (keep paragraph spacing)"
-    if normalized == "indented-compact":
-        return "Indented compact (minimal paragraph gap + indents)"
-    return "Traditional (paragraph spacing + indents)"
 
 
 def run_processing(
@@ -223,17 +262,18 @@ def run_processing(
     used_title = epub_content.detected_title
     used_author = epub_content.detected_author
 
-    output_pdf_path, output_docx_path, full_slug = build_output_paths(
+    output_pdf_path, output_docx_path, file_stem = build_output_paths(
         input_epub=input_epub,
         output_dir=output_dir,
         used_title=used_title,
         used_author=used_author,
         variant=variant,
+        spacing_mode=paragraph_spacing_mode,
     )
 
     log(f"Detected title: {used_title}")
     log(f"Detected author: {used_author}")
-    log(f"Selected variant: {variant}")
+    log(f"Selected variant: {describe_variant(variant)}")
     log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
     log("Building text cleanup preview samples...")
 
@@ -253,6 +293,7 @@ def run_processing(
             output_dir=output_dir,
             used_title=used_title,
             used_author=used_author,
+            spacing_mode=paragraph_spacing_mode,
             settings=layout_settings,
             log=log,
         )
@@ -289,7 +330,8 @@ def run_processing(
         "author": result.used_author,
         "output_dir": str(result.output_dir),
         "variant": variant,
-        "book_slug": full_slug,
+        "variant_label": describe_variant(variant),
+        "file_stem": file_stem,
         "input_epub": str(input_epub),
         "input_size_mb": input_size_mb,
         "pdf_size_mb": pdf_size_mb,
