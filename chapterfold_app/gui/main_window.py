@@ -45,10 +45,10 @@ class MainWindow(QMainWindow):
         self.export_docx_checkbox = QCheckBox("Also export DOCX")
         self.export_docx_checkbox.setChecked(True)
 
-        self.uniform_spacing_checkbox = QCheckBox(
-            "Uniform paragraph spacing (no extra paragraph gap)"
-        )
-        self.uniform_spacing_checkbox.setChecked(False)
+        self.spacing_mode_combo = QComboBox()
+        self.spacing_mode_combo.addItem("Traditional (paragraph spacing + indents)", "traditional")
+        self.spacing_mode_combo.addItem("No indents (keep paragraph spacing)", "no-indents")
+        self.spacing_mode_combo.addItem("Uniform (no paragraph gap, no indents)", "uniform")
 
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
@@ -105,12 +105,14 @@ class MainWindow(QMainWindow):
         form.addWidget(QLabel("Cleanup variant:"), 2, 0)
         form.addWidget(self.variant_combo, 2, 1)
 
-        form.addWidget(QLabel("Options:"), 3, 0)
+        form.addWidget(QLabel("Paragraph spacing:"), 3, 0)
+        form.addWidget(self.spacing_mode_combo, 3, 1)
+
+        form.addWidget(QLabel("Options:"), 4, 0)
 
         options_layout = QVBoxLayout()
         options_layout.addWidget(self.export_docx_checkbox)
-        options_layout.addWidget(self.uniform_spacing_checkbox)
-        form.addLayout(options_layout, 3, 1)
+        form.addLayout(options_layout, 4, 1)
 
         layout.addLayout(form)
 
@@ -186,7 +188,7 @@ class MainWindow(QMainWindow):
         self.browse_output_btn.setEnabled(not busy)
         self.variant_combo.setEnabled(not busy)
         self.export_docx_checkbox.setEnabled(not busy)
-        self.uniform_spacing_checkbox.setEnabled(not busy)
+        self.spacing_mode_combo.setEnabled(not busy)
 
     def _reset_results_ui(self) -> None:
         self.results_box.clear()
@@ -204,7 +206,7 @@ class MainWindow(QMainWindow):
         output_dir = self.output_edit.text().strip()
         variant = self.variant_combo.currentText()
         export_docx = self.export_docx_checkbox.isChecked()
-        uniform_paragraph_spacing = self.uniform_spacing_checkbox.isChecked()
+        paragraph_spacing_mode = self.spacing_mode_combo.currentData()
 
         if not input_path:
             QMessageBox.warning(self, "Missing input", "Please choose an EPUB file.")
@@ -232,7 +234,7 @@ class MainWindow(QMainWindow):
             output_dir=output_dir,
             variant=variant,
             export_docx=export_docx,
-            uniform_paragraph_spacing=uniform_paragraph_spacing,
+            paragraph_spacing_mode=paragraph_spacing_mode,
         )
         self.worker.moveToThread(self.thread)
 
@@ -263,17 +265,11 @@ class MainWindow(QMainWindow):
         return f"{value:+.2f} MB"
 
     def _build_results_text(self, payload: dict) -> str:
-        spacing_mode = (
-            "Uniform (no extra paragraph gap)"
-            if payload.get("uniform_paragraph_spacing")
-            else "Traditional"
-        )
-
         lines = [
             f"Title: {payload.get('title', '')}",
             f"Author: {payload.get('author', '')}",
             f"Variant: {payload.get('variant', '')}",
-            f"Paragraph spacing mode: {spacing_mode}",
+            f"Paragraph spacing mode: {payload.get('paragraph_spacing_mode_label', '')}",
             "",
             f"Input EPUB: {payload.get('input_epub', '')}",
             f"Output PDF: {payload.get('output_pdf', '')}",
