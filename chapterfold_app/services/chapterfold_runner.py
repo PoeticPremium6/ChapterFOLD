@@ -4,12 +4,15 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+from pypdf import PdfReader
+
 from core.epub_service import (
     CleanupSettings,
     EpubToPdfResult,
     LayoutSettings,
     build_book_slug,
     editable_docx_name,
+    extract_clean_text_from_html,
     interior_pdf_name,
     load_epub_content,
     process_epub_to_pdf,
@@ -52,6 +55,99 @@ def build_cleanup_settings(variant: str) -> CleanupSettings:
     return variants[variant]
 
 
+def build_raw_preview_cleanup_settings() -> CleanupSettings:
+    return CleanupSettings(
+        join_soft_wrapped_lines=False,
+        join_dialogue_continuations=False,
+        merge_dialogue_paragraphs=False,
+        collapse_extra_blank_lines=False,
+        preserve_scene_breaks=True,
+    )
+
+
+def file_size_mb(path: Path | None) -> float | None:
+    if path is None or not path.exists():
+        return None
+    return path.stat().st_size / (1024 * 1024)
+
+
+def pdf_page_count(path: Path) -> int:
+    reader = PdfReader(str(path))
+    return len(reader.pages)
+
+
+def trim_preview_text(text: str, limit: int = 1400) -> str:
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def build_preview_samples(
+    *,
+    sections: list[tuple[str, str]],
+    cleanup_settings: CleanupSettings,
+    max_samples: int = 3,
+) -> list[dict[str, str]]:
+    samples: list[dict[str, str]] = []
+    raw_settings = build_raw_preview_cleanup_settings()
+
+    for heading, raw_html in sections:
+        before = extract_clean_text_from_html(
+            raw_html,
+            drop_notes=False,
+            cleanup_settings=raw_settings,
+        ).strip()
+
+        after = extract_clean_text_from_html(
+            raw_html,
+            drop_notes=False,
+            cleanup_settings=cleanup_settings,
+        ).strip()
+
+        if not before or not after:
+            continue
+
+        if before == after:
+            continue
+
+        samples.append(
+            {
+                "heading": (heading or "(Untitled section)").strip(),
+                "before": trim_preview_text(before),
+                "after": trim_preview_text(after),
+            }
+        )
+
+        if len(samples) >= max_samples:
+            break
+
+    return samples
+
+
+def build_output_paths(
+    *,
+    input_epub: Path,
+    output_dir: Path,
+    used_title: str,
+    used_author: str,
+    variant: str,
+) -> tuple[Path, Path, str]:
+    book_slug = build_book_slug(
+        title=used_title,
+        author=used_author,
+        fallback_stem=input_epub.stem,
+    )
+
+    variant_slug = variant.replace(" ", "-").replace("_", "-")
+    full_slug = f"{book_slug}__{variant_slug}"
+
+    output_pdf_path = output_dir / interior_pdf_name(full_slug)
+    output_docx_path = output_dir / editable_docx_name(full_slug)
+
+    return output_pdf_path, output_docx_path, full_slug
+
+
 def run_processing(
     *,
     input_epub: Path,
@@ -59,7 +155,7 @@ def run_processing(
     variant: str,
     export_docx: bool,
     log_callback: LogCallback | None = None,
-) -> EpubToPdfResult:
+) -> dict:
     if not input_epub.exists():
         raise FileNotFoundError(f"Input EPUB not found: {input_epub}")
 
@@ -72,30 +168,32 @@ def run_processing(
     cleanup_settings = build_cleanup_settings(variant)
     layout_settings = LayoutSettings()
 
+    log("Reading EPUB metadata...")
     epub_content = load_epub_content(input_epub)
     used_title = epub_content.detected_title
     used_author = epub_content.detected_author
 
-    book_slug = build_book_slug(
-        title=used_title,
-        author=used_author,
-        fallback_stem=input_epub.stem,
+    output_pdf_path, output_docx_path, full_slug = build_output_paths(
+        input_epub=input_epub,
+        output_dir=output_dir,
+        used_title=used_title,
+        used_author=used_author,
+        variant=variant,
     )
 
-    variant_slug = variant.replace(" ", "-").replace("_", "-")
-    pdf_name = interior_pdf_name(f"{book_slug}__{variant_slug}")
-    docx_name = editable_docx_name(f"{book_slug}__{variant_slug}")
-
-    output_pdf_path = output_dir / pdf_name
-    output_docx_path = output_dir / docx_name
-
-    log("Starting ChapterFOLD processing...")
-    log(f"Input EPUB: {input_epub}")
-    log(f"Output folder: {output_dir}")
+    log(f"Detected title: {used_title}")
+    log(f"Detected author: {used_author}")
     log(f"Variant: {variant}")
-    log(f"Export DOCX: {'Yes' if export_docx else 'No'}")
+    log("Building preview samples...")
 
-    result = process_epub_to_pdf(
+    preview_samples = build_preview_samples(
+        sections=epub_content.sections,
+        cleanup_settings=cleanup_settings,
+        max_samples=3,
+    )
+
+    log("Rendering output files...")
+    result: EpubToPdfResult = process_epub_to_pdf(
         epub_path=input_epub,
         output_pdf_path=output_pdf_path,
         output_docx_path=output_docx_path if export_docx else None,
@@ -106,11 +204,31 @@ def run_processing(
         cleanup_settings=cleanup_settings,
     )
 
-    log(f"Detected title: {result.detected_title}")
-    log(f"Detected author: {result.detected_author}")
+    log("Calculating result stats...")
+    input_size_mb = file_size_mb(input_epub)
+    pdf_size_mb = file_size_mb(result.output_pdf)
+    docx_size_mb = file_size_mb(result.output_docx) if result.output_docx else None
+    output_pdf_pages = pdf_page_count(result.output_pdf)
+
     log(f"PDF created: {result.output_pdf}")
+    log(f"PDF pages: {output_pdf_pages}")
 
     if result.output_docx:
         log(f"DOCX created: {result.output_docx}")
 
-    return result
+    return {
+        "output_pdf": str(result.output_pdf),
+        "output_docx": str(result.output_docx) if result.output_docx else "",
+        "title": result.used_title,
+        "author": result.used_author,
+        "output_dir": str(result.output_dir),
+        "variant": variant,
+        "book_slug": full_slug,
+        "input_epub": str(input_epub),
+        "input_size_mb": input_size_mb,
+        "pdf_size_mb": pdf_size_mb,
+        "docx_size_mb": docx_size_mb,
+        "output_pdf_pages": output_pdf_pages,
+        "preview_samples": preview_samples,
+        "preview_sample_count": len(preview_samples),
+    }
