@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(1000, 760)
+        self.resize(1000, 780)
 
         self.thread: QThread | None = None
         self.worker: Worker | None = None
@@ -45,12 +45,17 @@ class MainWindow(QMainWindow):
         self.export_docx_checkbox = QCheckBox("Also export DOCX")
         self.export_docx_checkbox.setChecked(True)
 
+        self.uniform_spacing_checkbox = QCheckBox(
+            "Uniform paragraph spacing (no extra paragraph gap)"
+        )
+        self.uniform_spacing_checkbox.setChecked(False)
+
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
 
         self.results_box = QTextEdit()
         self.results_box.setReadOnly(True)
-        self.results_box.setMaximumHeight(220)
+        self.results_box.setMaximumHeight(240)
 
         self.before_preview = QTextEdit()
         self.before_preview.setReadOnly(True)
@@ -101,7 +106,11 @@ class MainWindow(QMainWindow):
         form.addWidget(self.variant_combo, 2, 1)
 
         form.addWidget(QLabel("Options:"), 3, 0)
-        form.addWidget(self.export_docx_checkbox, 3, 1)
+
+        options_layout = QVBoxLayout()
+        options_layout.addWidget(self.export_docx_checkbox)
+        options_layout.addWidget(self.uniform_spacing_checkbox)
+        form.addLayout(options_layout, 3, 1)
 
         layout.addLayout(form)
 
@@ -177,6 +186,7 @@ class MainWindow(QMainWindow):
         self.browse_output_btn.setEnabled(not busy)
         self.variant_combo.setEnabled(not busy)
         self.export_docx_checkbox.setEnabled(not busy)
+        self.uniform_spacing_checkbox.setEnabled(not busy)
 
     def _reset_results_ui(self) -> None:
         self.results_box.clear()
@@ -194,6 +204,7 @@ class MainWindow(QMainWindow):
         output_dir = self.output_edit.text().strip()
         variant = self.variant_combo.currentText()
         export_docx = self.export_docx_checkbox.isChecked()
+        uniform_paragraph_spacing = self.uniform_spacing_checkbox.isChecked()
 
         if not input_path:
             QMessageBox.warning(self, "Missing input", "Please choose an EPUB file.")
@@ -221,6 +232,7 @@ class MainWindow(QMainWindow):
             output_dir=output_dir,
             variant=variant,
             export_docx=export_docx,
+            uniform_paragraph_spacing=uniform_paragraph_spacing,
         )
         self.worker.moveToThread(self.thread)
 
@@ -251,10 +263,17 @@ class MainWindow(QMainWindow):
         return f"{value:+.2f} MB"
 
     def _build_results_text(self, payload: dict) -> str:
+        spacing_mode = (
+            "Uniform (no extra paragraph gap)"
+            if payload.get("uniform_paragraph_spacing")
+            else "Traditional"
+        )
+
         lines = [
             f"Title: {payload.get('title', '')}",
             f"Author: {payload.get('author', '')}",
             f"Variant: {payload.get('variant', '')}",
+            f"Paragraph spacing mode: {spacing_mode}",
             "",
             f"Input EPUB: {payload.get('input_epub', '')}",
             f"Output PDF: {payload.get('output_pdf', '')}",
@@ -294,10 +313,6 @@ class MainWindow(QMainWindow):
         return "\n".join(lines)
 
     def _on_success(self, payload: dict) -> None:
-        pdf_path = payload.get("output_pdf", "")
-        docx_path = payload.get("output_docx", "")
-        title = payload.get("title", "")
-        author = payload.get("author", "")
         output_dir = payload.get("output_dir", "")
 
         self.last_output_dir = output_dir
@@ -308,13 +323,6 @@ class MainWindow(QMainWindow):
         self.preview_samples = payload.get("preview_samples", []) or []
         self.current_preview_index = 0
         self._render_current_preview()
-
-        self._append_log("")
-        self._append_log(f"Title: {title}")
-        self._append_log(f"Author: {author}")
-        self._append_log(f"PDF created: {pdf_path}")
-        if docx_path:
-            self._append_log(f"DOCX created: {docx_path}")
 
         QMessageBox.information(self, "Success", "Completed successfully.")
 
@@ -329,7 +337,9 @@ class MainWindow(QMainWindow):
             self.preview_heading_label.setText("Text preview sample: none")
             self.preview_index_label.setText("0 / 0")
             self.before_preview.setPlainText("No text cleanup preview samples were found.")
-            self.after_preview.setPlainText("This can still be normal if the visible difference is mainly layout or pagination.")
+            self.after_preview.setPlainText(
+                "This can still be normal if the visible difference is mainly layout, paragraph spacing, or pagination."
+            )
             self.prev_preview_btn.setEnabled(False)
             self.next_preview_btn.setEnabled(False)
             return
