@@ -45,6 +45,7 @@ class CleanupSettings:
     join_soft_wrapped_lines: bool = True
     join_dialogue_continuations: bool = True
     merge_dialogue_paragraphs: bool = False
+    aggressive_mode: bool = False
     collapse_extra_blank_lines: bool = True
     preserve_scene_breaks: bool = True
 
@@ -85,6 +86,8 @@ DIALOGUE_TAG_START_RE = re.compile(
 )
 
 LOWER_CONTINUATION_RE = re.compile(r"^[a-z(\[\u2014\-']")
+TERMINAL_END_RE = re.compile(r'[.!?]["\u201d\u2019\']?$')
+OPENING_QUOTE_RE = re.compile(r'^[\"\u201c\u2018]')
 
 def cm(value: float) -> str:
     return f"{value:.3f}cm"
@@ -335,7 +338,11 @@ def _raw_paragraph_items_from_fragment(fragment: str, *, drop_notes: bool = Fals
     return deduped
 
 
-def should_merge_dialogue_paragraphs(current: str, nxt: str) -> bool:
+def should_merge_dialogue_paragraphs(
+    current: str,
+    nxt: str,
+    settings: CleanupSettings,
+) -> bool:
     current = current.strip()
     nxt = nxt.strip()
     if not current or not nxt:
@@ -348,16 +355,31 @@ def should_merge_dialogue_paragraphs(current: str, nxt: str) -> bool:
     if re.search(r'["\u201d\u2019]$', current) and DIALOGUE_TAG_START_RE.match(nxt):
         return True
 
-    # Continuation after comma, dash, or open-ended quote.
-    if re.search(r'[,;:\u2014\-]$|["\u201d\u2019]$', current) and LOWER_CONTINUATION_RE.match(nxt):
-        return True
-
-    # Small follow-up fragment like: "..." Ron asks.
-    if len(nxt) <= 80 and (
-        DIALOGUE_TAG_START_RE.match(nxt)
-        or LOWER_CONTINUATION_RE.match(nxt)
+    # Continuation after comma, dash, colon, semicolon, or open-ended quote.
+    if re.search(r'[,;:\u2014\-]$|["\u201d\u2019]$', current) and (
+        LOWER_CONTINUATION_RE.match(nxt) or DIALOGUE_TAG_START_RE.match(nxt)
     ):
         return True
+
+    if not settings.aggressive_mode:
+        return False
+
+    # Aggressive mode: short orphaned continuation paragraph.
+    if len(current) <= 110 and not TERMINAL_END_RE.search(current):
+        if LOWER_CONTINUATION_RE.match(nxt) or DIALOGUE_TAG_START_RE.match(nxt):
+            return True
+
+    # Aggressive mode: short quote fragment flowing into next paragraph.
+    if len(current) <= 90 and OPENING_QUOTE_RE.match(current):
+        if not TERMINAL_END_RE.search(current):
+            return True
+
+    # Aggressive mode: very short lowercase/dialogue-tag continuation.
+    if len(nxt) <= 120 and (
+        LOWER_CONTINUATION_RE.match(nxt) or DIALOGUE_TAG_START_RE.match(nxt)
+    ):
+        if not TERMINAL_END_RE.search(current):
+            return True
 
     return False
 
@@ -375,7 +397,7 @@ def merge_adjacent_paragraph_items(
             merged
             and kind == "p"
             and merged[-1][0] == "p"
-            and should_merge_dialogue_paragraphs(merged[-1][1], text)
+            and should_merge_dialogue_paragraphs(merged[-1][1], text, settings)
         ):
             merged[-1] = ("p", f"{merged[-1][1].rstrip()} {text.lstrip()}")
         else:
@@ -465,6 +487,26 @@ def build_clean_text_sections(
             cleaned_sections.append((heading, cleaned_text))
     return cleaned_sections
 
+def strip_duplicate_opening_heading_paragraph(cleaned_html: str, heading: str) -> str:
+    heading = heading.strip()
+    if not heading:
+        return cleaned_html
+
+    lines = [line for line in cleaned_html.splitlines() if line.strip()]
+    if not lines:
+        return cleaned_html
+
+    match = re.fullmatch(r"<p>(.*?)</p>", lines[0].strip())
+    if not match:
+        return cleaned_html
+
+    first_para = html.unescape(match.group(1)).strip()
+
+    normalize = lambda s: re.sub(r"\s+", " ", s).strip().casefold()
+    if normalize(first_para) == normalize(heading):
+        return "\n".join(lines[1:]).strip()
+
+    return cleaned_html
 
 def build_section_blocks(
     sections: List[Tuple[str, str]],
@@ -481,6 +523,8 @@ def build_section_blocks(
             drop_notes=drop_notes,
             cleanup_settings=cleanup_settings,
         )
+        cleaned = strip_duplicate_opening_heading_paragraph(cleaned, heading)
+
         if not cleaned.strip():
             continue
 
