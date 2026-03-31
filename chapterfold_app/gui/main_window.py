@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         self.spacing_mode_combo = QComboBox()
         self.spacing_mode_combo.addItem("Traditional (paragraph spacing + indents)", "traditional")
         self.spacing_mode_combo.addItem("No indents (keep paragraph spacing)", "no-indents")
+        self.spacing_mode_combo.addItem("Indented compact (minimal paragraph gap + indents)", "indented-compact")
         self.spacing_mode_combo.addItem("Uniform (no paragraph gap, no indents)", "uniform")
 
         self.log_box = QTextEdit()
