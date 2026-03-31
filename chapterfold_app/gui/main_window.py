@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QThread
@@ -26,7 +27,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(800, 560)
+        self.resize(1000, 760)
 
         self.thread: QThread | None = None
         self.worker: Worker | None = None
@@ -47,13 +48,33 @@ class MainWindow(QMainWindow):
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
 
+        self.results_box = QTextEdit()
+        self.results_box.setReadOnly(True)
+        self.results_box.setMaximumHeight(180)
+
+        self.before_preview = QTextEdit()
+        self.before_preview.setReadOnly(True)
+
+        self.after_preview = QTextEdit()
+        self.after_preview.setReadOnly(True)
+
+        self.preview_heading_label = QLabel("Preview sample: none")
+        self.preview_index_label = QLabel("0 / 0")
+
         self.browse_input_btn = QPushButton("Browse...")
         self.browse_output_btn = QPushButton("Browse...")
         self.process_btn = QPushButton("Process EPUB")
         self.open_output_btn = QPushButton("Open Output Folder")
         self.open_output_btn.setEnabled(False)
 
+        self.prev_preview_btn = QPushButton("Previous")
+        self.next_preview_btn = QPushButton("Next")
+        self.prev_preview_btn.setEnabled(False)
+        self.next_preview_btn.setEnabled(False)
+
         self.last_output_dir: str | None = None
+        self.preview_samples: list[dict[str, str]] = []
+        self.current_preview_index = 0
 
         self._build_ui()
         self._connect_signals()
@@ -90,6 +111,33 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self.process_btn)
         layout.addLayout(buttons)
 
+        layout.addWidget(QLabel("Results"))
+        layout.addWidget(self.results_box)
+
+        preview_header = QHBoxLayout()
+        preview_header.addWidget(QLabel("Before / After Preview"))
+        preview_header.addStretch()
+        preview_header.addWidget(self.preview_heading_label)
+        preview_header.addSpacing(12)
+        preview_header.addWidget(self.prev_preview_btn)
+        preview_header.addWidget(self.next_preview_btn)
+        preview_header.addWidget(self.preview_index_label)
+        layout.addLayout(preview_header)
+
+        preview_layout = QHBoxLayout()
+
+        before_layout = QVBoxLayout()
+        before_layout.addWidget(QLabel("Before"))
+        before_layout.addWidget(self.before_preview)
+
+        after_layout = QVBoxLayout()
+        after_layout.addWidget(QLabel("After"))
+        after_layout.addWidget(self.after_preview)
+
+        preview_layout.addLayout(before_layout)
+        preview_layout.addLayout(after_layout)
+        layout.addLayout(preview_layout)
+
         layout.addWidget(QLabel("Log"))
         layout.addWidget(self.log_box)
 
@@ -98,6 +146,8 @@ class MainWindow(QMainWindow):
         self.browse_output_btn.clicked.connect(self._browse_output)
         self.process_btn.clicked.connect(self._start_processing)
         self.open_output_btn.clicked.connect(self._open_output_folder)
+        self.prev_preview_btn.clicked.connect(self._show_previous_preview)
+        self.next_preview_btn.clicked.connect(self._show_next_preview)
 
     def _browse_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -128,6 +178,17 @@ class MainWindow(QMainWindow):
         self.variant_combo.setEnabled(not busy)
         self.export_docx_checkbox.setEnabled(not busy)
 
+    def _reset_results_ui(self) -> None:
+        self.results_box.clear()
+        self.before_preview.clear()
+        self.after_preview.clear()
+        self.preview_heading_label.setText("Preview sample: none")
+        self.preview_index_label.setText("0 / 0")
+        self.preview_samples = []
+        self.current_preview_index = 0
+        self.prev_preview_btn.setEnabled(False)
+        self.next_preview_btn.setEnabled(False)
+
     def _start_processing(self) -> None:
         input_path = self.input_edit.text().strip()
         output_dir = self.output_edit.text().strip()
@@ -147,7 +208,10 @@ class MainWindow(QMainWindow):
             return
 
         self.log_box.clear()
+        self._reset_results_ui()
+        self.last_output_dir = None
         self.open_output_btn.setEnabled(False)
+
         self._append_log("Launching job...")
         self._set_busy(True)
 
@@ -171,6 +235,41 @@ class MainWindow(QMainWindow):
 
         self.thread.start()
 
+    def _format_size(self, value: float | None) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value:.2f} MB"
+
+    def _build_results_text(self, payload: dict) -> str:
+        lines = [
+            f"Title: {payload.get('title', '')}",
+            f"Author: {payload.get('author', '')}",
+            f"Variant: {payload.get('variant', '')}",
+            "",
+            f"Input EPUB: {payload.get('input_epub', '')}",
+            f"Output PDF: {payload.get('output_pdf', '')}",
+        ]
+
+        output_docx = payload.get("output_docx", "")
+        if output_docx:
+            lines.append(f"Output DOCX: {output_docx}")
+
+        lines.extend([
+            "",
+            f"Input EPUB size: {self._format_size(payload.get('input_size_mb'))}",
+            f"Output PDF size: {self._format_size(payload.get('pdf_size_mb'))}",
+        ])
+
+        if payload.get("docx_size_mb") is not None:
+            lines.append(f"Output DOCX size: {self._format_size(payload.get('docx_size_mb'))}")
+
+        lines.extend([
+            f"Output PDF pages: {payload.get('output_pdf_pages', 'N/A')}",
+            f"Preview changes found: {payload.get('preview_sample_count', 0)}",
+        ])
+
+        return "\n".join(lines)
+
     def _on_success(self, payload: dict) -> None:
         pdf_path = payload.get("output_pdf", "")
         docx_path = payload.get("output_docx", "")
@@ -180,6 +279,12 @@ class MainWindow(QMainWindow):
 
         self.last_output_dir = output_dir
         self.open_output_btn.setEnabled(bool(output_dir))
+
+        self.results_box.setPlainText(self._build_results_text(payload))
+
+        self.preview_samples = payload.get("preview_samples", []) or []
+        self.current_preview_index = 0
+        self._render_current_preview()
 
         self._append_log("")
         self._append_log(f"Title: {title}")
@@ -198,6 +303,41 @@ class MainWindow(QMainWindow):
         self._append_log(error_text)
         QMessageBox.critical(self, "Error", error_text)
 
+    def _render_current_preview(self) -> None:
+        total = len(self.preview_samples)
+
+        if total == 0:
+            self.preview_heading_label.setText("Preview sample: none")
+            self.preview_index_label.setText("0 / 0")
+            self.before_preview.setPlainText("No changed preview samples were found.")
+            self.after_preview.setPlainText("Try a different variant, such as paragraph-dialogue-merge.")
+            self.prev_preview_btn.setEnabled(False)
+            self.next_preview_btn.setEnabled(False)
+            return
+
+        sample = self.preview_samples[self.current_preview_index]
+        heading = sample.get("heading", "(Untitled section)")
+        before = sample.get("before", "")
+        after = sample.get("after", "")
+
+        self.preview_heading_label.setText(f"Preview sample: {heading}")
+        self.preview_index_label.setText(f"{self.current_preview_index + 1} / {total}")
+        self.before_preview.setPlainText(before)
+        self.after_preview.setPlainText(after)
+
+        self.prev_preview_btn.setEnabled(self.current_preview_index > 0)
+        self.next_preview_btn.setEnabled(self.current_preview_index < total - 1)
+
+    def _show_previous_preview(self) -> None:
+        if self.current_preview_index > 0:
+            self.current_preview_index -= 1
+            self._render_current_preview()
+
+    def _show_next_preview(self) -> None:
+        if self.current_preview_index < len(self.preview_samples) - 1:
+            self.current_preview_index += 1
+            self._render_current_preview()
+
     def _open_output_folder(self) -> None:
         if not self.last_output_dir:
             return
@@ -207,5 +347,4 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Missing folder", "The output folder no longer exists.")
             return
 
-        import os
         os.startfile(str(path))
