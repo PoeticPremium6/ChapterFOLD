@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
 
         self.results_box = QTextEdit()
         self.results_box.setReadOnly(True)
-        self.results_box.setMaximumHeight(180)
+        self.results_box.setMaximumHeight(220)
 
         self.before_preview = QTextEdit()
         self.before_preview.setReadOnly(True)
@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self.after_preview = QTextEdit()
         self.after_preview.setReadOnly(True)
 
-        self.preview_heading_label = QLabel("Preview sample: none")
+        self.preview_heading_label = QLabel("Text preview sample: none")
         self.preview_index_label = QLabel("0 / 0")
 
         self.browse_input_btn = QPushButton("Browse...")
@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.results_box)
 
         preview_header = QHBoxLayout()
-        preview_header.addWidget(QLabel("Before / After Preview"))
+        preview_header.addWidget(QLabel("Text Cleanup Preview"))
         preview_header.addStretch()
         preview_header.addWidget(self.preview_heading_label)
         preview_header.addSpacing(12)
@@ -182,7 +182,7 @@ class MainWindow(QMainWindow):
         self.results_box.clear()
         self.before_preview.clear()
         self.after_preview.clear()
-        self.preview_heading_label.setText("Preview sample: none")
+        self.preview_heading_label.setText("Text preview sample: none")
         self.preview_index_label.setText("0 / 0")
         self.preview_samples = []
         self.current_preview_index = 0
@@ -240,6 +240,16 @@ class MainWindow(QMainWindow):
             return "N/A"
         return f"{value:.2f} MB"
 
+    def _format_signed_int(self, value: int | None) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value:+d}"
+
+    def _format_signed_float(self, value: float | None) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value:+.2f} MB"
+
     def _build_results_text(self, payload: dict) -> str:
         lines = [
             f"Title: {payload.get('title', '')}",
@@ -257,15 +267,28 @@ class MainWindow(QMainWindow):
         lines.extend([
             "",
             f"Input EPUB size: {self._format_size(payload.get('input_size_mb'))}",
-            f"Output PDF size: {self._format_size(payload.get('pdf_size_mb'))}",
+            f"Selected PDF size: {self._format_size(payload.get('pdf_size_mb'))}",
         ])
 
         if payload.get("docx_size_mb") is not None:
             lines.append(f"Output DOCX size: {self._format_size(payload.get('docx_size_mb'))}")
 
+        lines.append(f"Selected PDF pages: {payload.get('output_pdf_pages', 'N/A')}")
+
+        if payload.get("variant") != "standard":
+            lines.extend([
+                "",
+                "Baseline comparison (standard):",
+                f"Baseline PDF: {payload.get('baseline_pdf', '')}",
+                f"Baseline PDF size: {self._format_size(payload.get('baseline_pdf_size_mb'))}",
+                f"Baseline PDF pages: {payload.get('baseline_pdf_pages', 'N/A')}",
+                f"Page delta vs baseline: {self._format_signed_int(payload.get('page_delta_vs_baseline'))}",
+                f"PDF size delta vs baseline: {self._format_signed_float(payload.get('size_delta_mb_vs_baseline'))}",
+            ])
+
         lines.extend([
-            f"Output PDF pages: {payload.get('output_pdf_pages', 'N/A')}",
-            f"Preview changes found: {payload.get('preview_sample_count', 0)}",
+            "",
+            f"Text cleanup preview changes found: {payload.get('preview_sample_count', 0)}",
         ])
 
         return "\n".join(lines)
@@ -293,11 +316,7 @@ class MainWindow(QMainWindow):
         if docx_path:
             self._append_log(f"DOCX created: {docx_path}")
 
-        message = f"Completed successfully.\n\nPDF:\n{pdf_path}"
-        if docx_path:
-            message += f"\n\nDOCX:\n{docx_path}"
-
-        QMessageBox.information(self, "Success", message)
+        QMessageBox.information(self, "Success", "Completed successfully.")
 
     def _on_error(self, error_text: str) -> None:
         self._append_log(error_text)
@@ -307,10 +326,10 @@ class MainWindow(QMainWindow):
         total = len(self.preview_samples)
 
         if total == 0:
-            self.preview_heading_label.setText("Preview sample: none")
+            self.preview_heading_label.setText("Text preview sample: none")
             self.preview_index_label.setText("0 / 0")
-            self.before_preview.setPlainText("No changed preview samples were found.")
-            self.after_preview.setPlainText("Try a different variant, such as paragraph-dialogue-merge.")
+            self.before_preview.setPlainText("No text cleanup preview samples were found.")
+            self.after_preview.setPlainText("This can still be normal if the visible difference is mainly layout or pagination.")
             self.prev_preview_btn.setEnabled(False)
             self.next_preview_btn.setEnabled(False)
             return
@@ -320,7 +339,7 @@ class MainWindow(QMainWindow):
         before = sample.get("before", "")
         after = sample.get("after", "")
 
-        self.preview_heading_label.setText(f"Preview sample: {heading}")
+        self.preview_heading_label.setText(f"Text preview sample: {heading}")
         self.preview_index_label.setText(f"{self.current_preview_index + 1} / {total}")
         self.before_preview.setPlainText(before)
         self.after_preview.setPlainText(after)
