@@ -22,6 +22,7 @@ class Worker(QObject):
         variant: str,
         export_docx: bool,
         paragraph_spacing_mode: str,
+        margin_preset: str,
     ) -> None:
         super().__init__()
         self.input_epub = input_epub
@@ -29,6 +30,7 @@ class Worker(QObject):
         self.variant = variant
         self.export_docx = export_docx
         self.paragraph_spacing_mode = paragraph_spacing_mode
+        self.margin_preset = margin_preset
 
     @Slot()
     def run(self) -> None:
@@ -39,6 +41,7 @@ class Worker(QObject):
                 variant=self.variant,
                 export_docx=self.export_docx,
                 paragraph_spacing_mode=self.paragraph_spacing_mode,
+                margin_preset=self.margin_preset,
                 log_callback=self.log.emit,
             )
             self.success.emit(payload)
