@@ -31,22 +31,14 @@ class Worker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            result = run_processing(
+            payload = run_processing(
                 input_epub=Path(self.input_epub),
                 output_dir=Path(self.output_dir),
                 variant=self.variant,
                 export_docx=self.export_docx,
                 log_callback=self.log.emit,
             )
-            self.success.emit(
-                {
-                    "output_pdf": str(result.output_pdf),
-                    "output_docx": str(result.output_docx) if result.output_docx else "",
-                    "title": result.used_title,
-                    "author": result.used_author,
-                    "output_dir": str(result.output_dir),
-                }
-            )
+            self.success.emit(payload)
         except Exception:
             self.error.emit(traceback.format_exc())
         finally:
