@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(1000, 780)
+        self.resize(1040, 800)
 
         self.thread: QThread | None = None
         self.worker: Worker | None = None
@@ -36,11 +36,9 @@ class MainWindow(QMainWindow):
         self.output_edit = QLineEdit()
 
         self.variant_combo = QComboBox()
-        self.variant_combo.addItems([
-            "standard",
-            "aggressive-cleanup",
-            "paragraph-dialogue-merge",
-        ])
+        self.variant_combo.addItem("Standard Cleanup", "standard")
+        self.variant_combo.addItem("Dialogue Merge", "paragraph-dialogue-merge")
+        self.variant_combo.addItem("Aggressive Cleanup", "aggressive-cleanup")
 
         self.export_docx_checkbox = QCheckBox("Also export DOCX")
         self.export_docx_checkbox.setChecked(True)
@@ -56,7 +54,7 @@ class MainWindow(QMainWindow):
 
         self.results_box = QTextEdit()
         self.results_box.setReadOnly(True)
-        self.results_box.setMaximumHeight(240)
+        self.results_box.setMaximumHeight(260)
 
         self.before_preview = QTextEdit()
         self.before_preview.setReadOnly(True)
@@ -66,12 +64,17 @@ class MainWindow(QMainWindow):
 
         self.preview_heading_label = QLabel("Text preview sample: none")
         self.preview_index_label = QLabel("0 / 0")
+        self.status_label = QLabel("Ready")
 
         self.browse_input_btn = QPushButton("Browse...")
         self.browse_output_btn = QPushButton("Browse...")
         self.process_btn = QPushButton("Process EPUB")
         self.open_output_btn = QPushButton("Open Output Folder")
         self.open_output_btn.setEnabled(False)
+        self.open_pdf_btn = QPushButton("Open PDF")
+        self.open_pdf_btn.setEnabled(False)
+        self.open_docx_btn = QPushButton("Open DOCX")
+        self.open_docx_btn.setEnabled(False)
 
         self.prev_preview_btn = QPushButton("Previous")
         self.next_preview_btn = QPushButton("Next")
@@ -79,6 +82,8 @@ class MainWindow(QMainWindow):
         self.next_preview_btn.setEnabled(False)
 
         self.last_output_dir: str | None = None
+        self.last_output_pdf: str | None = None
+        self.last_output_docx: str | None = None
         self.preview_samples: list[dict[str, str]] = []
         self.current_preview_index = 0
 
@@ -103,14 +108,13 @@ class MainWindow(QMainWindow):
         form.addWidget(self.output_edit, 1, 1)
         form.addWidget(self.browse_output_btn, 1, 2)
 
-        form.addWidget(QLabel("Cleanup variant:"), 2, 0)
+        form.addWidget(QLabel("Cleanup mode:"), 2, 0)
         form.addWidget(self.variant_combo, 2, 1)
 
         form.addWidget(QLabel("Paragraph spacing:"), 3, 0)
         form.addWidget(self.spacing_mode_combo, 3, 1)
 
         form.addWidget(QLabel("Options:"), 4, 0)
-
         options_layout = QVBoxLayout()
         options_layout.addWidget(self.export_docx_checkbox)
         form.addLayout(options_layout, 4, 1)
@@ -119,10 +123,13 @@ class MainWindow(QMainWindow):
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.open_output_btn)
+        buttons.addWidget(self.open_pdf_btn)
+        buttons.addWidget(self.open_docx_btn)
         buttons.addStretch()
         buttons.addWidget(self.process_btn)
         layout.addLayout(buttons)
 
+        layout.addWidget(self.status_label)
         layout.addWidget(QLabel("Results"))
         layout.addWidget(self.results_box)
 
@@ -158,6 +165,8 @@ class MainWindow(QMainWindow):
         self.browse_output_btn.clicked.connect(self._browse_output)
         self.process_btn.clicked.connect(self._start_processing)
         self.open_output_btn.clicked.connect(self._open_output_folder)
+        self.open_pdf_btn.clicked.connect(self._open_pdf)
+        self.open_docx_btn.clicked.connect(self._open_docx)
         self.prev_preview_btn.clicked.connect(self._show_previous_preview)
         self.next_preview_btn.clicked.connect(self._show_next_preview)
 
@@ -182,6 +191,8 @@ class MainWindow(QMainWindow):
 
     def _append_log(self, message: str) -> None:
         self.log_box.append(message)
+        if message.strip():
+            self.status_label.setText(message)
 
     def _set_busy(self, busy: bool) -> None:
         self.process_btn.setEnabled(not busy)
@@ -201,11 +212,17 @@ class MainWindow(QMainWindow):
         self.current_preview_index = 0
         self.prev_preview_btn.setEnabled(False)
         self.next_preview_btn.setEnabled(False)
+        self.last_output_dir = None
+        self.last_output_pdf = None
+        self.last_output_docx = None
+        self.open_output_btn.setEnabled(False)
+        self.open_pdf_btn.setEnabled(False)
+        self.open_docx_btn.setEnabled(False)
 
     def _start_processing(self) -> None:
         input_path = self.input_edit.text().strip()
         output_dir = self.output_edit.text().strip()
-        variant = self.variant_combo.currentText()
+        variant = self.variant_combo.currentData()
         export_docx = self.export_docx_checkbox.isChecked()
         paragraph_spacing_mode = self.spacing_mode_combo.currentData()
 
@@ -223,8 +240,6 @@ class MainWindow(QMainWindow):
 
         self.log_box.clear()
         self._reset_results_ui()
-        self.last_output_dir = None
-        self.open_output_btn.setEnabled(False)
 
         self._append_log("Launching job...")
         self._set_busy(True)
@@ -269,7 +284,7 @@ class MainWindow(QMainWindow):
         lines = [
             f"Title: {payload.get('title', '')}",
             f"Author: {payload.get('author', '')}",
-            f"Variant: {payload.get('variant', '')}",
+            f"Cleanup mode: {payload.get('variant_label', payload.get('variant', ''))}",
             f"Paragraph spacing mode: {payload.get('paragraph_spacing_mode_label', '')}",
             "",
             f"Input EPUB: {payload.get('input_epub', '')}",
@@ -294,7 +309,7 @@ class MainWindow(QMainWindow):
         if payload.get("variant") != "standard":
             lines.extend([
                 "",
-                "Baseline comparison (standard):",
+                "Baseline comparison (Standard Cleanup):",
                 f"Baseline PDF: {payload.get('baseline_pdf', '')}",
                 f"Baseline PDF size: {self._format_size(payload.get('baseline_pdf_size_mb'))}",
                 f"Baseline PDF pages: {payload.get('baseline_pdf_pages', 'N/A')}",
@@ -310,10 +325,13 @@ class MainWindow(QMainWindow):
         return "\n".join(lines)
 
     def _on_success(self, payload: dict) -> None:
-        output_dir = payload.get("output_dir", "")
+        self.last_output_dir = payload.get("output_dir", "")
+        self.last_output_pdf = payload.get("output_pdf", "")
+        self.last_output_docx = payload.get("output_docx", "")
 
-        self.last_output_dir = output_dir
-        self.open_output_btn.setEnabled(bool(output_dir))
+        self.open_output_btn.setEnabled(bool(self.last_output_dir))
+        self.open_pdf_btn.setEnabled(bool(self.last_output_pdf))
+        self.open_docx_btn.setEnabled(bool(self.last_output_docx))
 
         self.results_box.setPlainText(self._build_results_text(payload))
 
@@ -321,10 +339,12 @@ class MainWindow(QMainWindow):
         self.current_preview_index = 0
         self._render_current_preview()
 
+        self.status_label.setText("Completed successfully.")
         QMessageBox.information(self, "Success", "Completed successfully.")
 
     def _on_error(self, error_text: str) -> None:
         self._append_log(error_text)
+        self.status_label.setText("Error")
         QMessageBox.critical(self, "Error", error_text)
 
     def _render_current_preview(self) -> None:
@@ -335,7 +355,7 @@ class MainWindow(QMainWindow):
             self.preview_index_label.setText("0 / 0")
             self.before_preview.setPlainText("No text cleanup preview samples were found.")
             self.after_preview.setPlainText(
-                "This can still be normal if the visible difference is mainly layout, paragraph spacing, or pagination."
+                "This can still be normal if the visible difference is mainly layout, spacing, or pagination."
             )
             self.prev_preview_btn.setEnabled(False)
             self.next_preview_btn.setEnabled(False)
@@ -371,6 +391,28 @@ class MainWindow(QMainWindow):
         path = Path(self.last_output_dir)
         if not path.exists():
             QMessageBox.warning(self, "Missing folder", "The output folder no longer exists.")
+            return
+
+        os.startfile(str(path))
+
+    def _open_pdf(self) -> None:
+        if not self.last_output_pdf:
+            return
+
+        path = Path(self.last_output_pdf)
+        if not path.exists():
+            QMessageBox.warning(self, "Missing file", "The PDF file no longer exists.")
+            return
+
+        os.startfile(str(path))
+
+    def _open_docx(self) -> None:
+        if not self.last_output_docx:
+            return
+
+        path = Path(self.last_output_docx)
+        if not path.exists():
+            QMessageBox.warning(self, "Missing file", "The DOCX file no longer exists.")
             return
 
         os.startfile(str(path))
