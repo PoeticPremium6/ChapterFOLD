@@ -498,6 +498,36 @@ def build_section_blocks(
 
 
 def build_css(settings: LayoutSettings) -> str:
+    if settings.uniform_paragraph_spacing:
+        paragraph_css = """
+p {
+  margin: 0;
+  text-align: justify;
+  text-indent: 0;
+  orphans: 2;
+  widows: 2;
+}
+
+.chapter p + p {
+  text-indent: 0;
+  margin-top: 0;
+}
+"""
+    else:
+        paragraph_css = """
+p {
+  margin: 0 0 0.65em 0;
+  text-align: justify;
+  text-indent: 0;
+  orphans: 2;
+  widows: 2;
+}
+
+.chapter p + p {
+  text-indent: 1.2em;
+}
+"""
+
     return f"""
 @page {{
   size: {cm(settings.trim_width_cm)} {cm(settings.trim_height_cm)};
@@ -575,17 +605,7 @@ body {{
   page-break-after: avoid;
 }}
 
-p {{
-  margin: 0 0 0.65em 0;
-  text-align: justify;
-  text-indent: 0;
-  orphans: 2;
-  widows: 2;
-}}
-
-.chapter p + p {{
-  text-indent: 1.2em;
-}}
+{paragraph_css}
 
 h1, h2, h3, h4 {{
   page-break-after: avoid;
