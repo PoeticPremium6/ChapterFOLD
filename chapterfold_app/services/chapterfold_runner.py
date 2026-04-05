@@ -39,10 +39,7 @@ def build_cleanup_settings(variant: str) -> CleanupSettings:
         preserve_scene_breaks=True,
     )
 
-    aggressive = replace(
-        dialogue_merge,
-        aggressive_mode=True,
-    )
+    aggressive = replace(dialogue_merge, aggressive_mode=True)
 
     variants = {
         "standard": standard,
@@ -74,6 +71,39 @@ def describe_spacing_mode(mode: str) -> str:
     if normalized == "indented-compact":
         return "Indented compact (minimal paragraph gap + indents)"
     return "Traditional (paragraph spacing + indents)"
+
+
+def describe_margin_preset(margin_preset: str) -> str:
+    preset = (margin_preset or "standard").strip().lower()
+    mapping = {
+        "standard": "Standard",
+        "compact": "Compact",
+        "wide": "Wide",
+        "large-print": "Large print friendly",
+    }
+    return mapping.get(preset, margin_preset)
+
+
+def describe_binding_direction(binding_direction: str) -> str:
+    direction = (binding_direction or "ltr").strip().lower()
+    if direction == "rtl":
+        return "Right-to-left"
+    return "Left-to-right"
+
+
+def describe_imposition_mode(mode: str) -> str:
+    normalized = (mode or "none").strip().lower()
+    mapping = {
+        "none": "Do not create imposed PDF",
+        "also": "Also create imposed PDF",
+    }
+    return mapping.get(normalized, mode)
+
+
+def describe_max_end_padding(max_end_padding: int | None) -> str:
+    if max_end_padding is None:
+        return "Unlimited"
+    return str(max_end_padding)
 
 
 def build_layout_settings(
@@ -109,39 +139,6 @@ def build_layout_settings(
         layout.margin_outside_cm = 1.0
 
     return layout
-
-
-def describe_margin_preset(margin_preset: str) -> str:
-    preset = (margin_preset or "standard").strip().lower()
-    mapping = {
-        "standard": "Standard",
-        "compact": "Compact",
-        "wide": "Wide",
-        "large-print": "Large print friendly",
-    }
-    return mapping.get(preset, margin_preset)
-
-
-def describe_binding_direction(binding_direction: str) -> str:
-    direction = (binding_direction or "ltr").strip().lower()
-    if direction == "rtl":
-        return "Right-to-left"
-    return "Left-to-right"
-
-
-def describe_imposition_mode(mode: str) -> str:
-    normalized = (mode or "none").strip().lower()
-    mapping = {
-        "none": "Do not create imposed PDF",
-        "also": "Also create imposed PDF",
-    }
-    return mapping.get(normalized, mode)
-
-
-def describe_max_end_padding(max_end_padding: int | None) -> str:
-    if max_end_padding is None:
-        return "Unlimited"
-    return str(max_end_padding)
 
 
 def build_raw_preview_cleanup_settings() -> CleanupSettings:
@@ -213,7 +210,7 @@ def build_output_paths(
     variant: str,
     spacing_mode: str,
     margin_preset: str,
-) -> tuple[Path, Path, str]:
+) -> tuple[Path, Path, Path, str]:
     stem = build_file_stem(
         author=used_author or input_epub.stem,
         title=used_title or input_epub.stem,
@@ -224,8 +221,9 @@ def build_output_paths(
 
     output_pdf_path = output_dir / f"{stem} - Interior.pdf"
     output_docx_path = output_dir / f"{stem} - Editable.docx"
+    output_markdown_path = output_dir / f"{stem} - Google Docs.md"
 
-    return output_pdf_path, output_docx_path, stem
+    return output_pdf_path, output_docx_path, output_markdown_path, stem
 
 
 def build_imposed_output_path(
@@ -294,7 +292,7 @@ def render_baseline_pdf(
     baseline_variant = "standard"
     baseline_cleanup = build_cleanup_settings(baseline_variant)
 
-    baseline_pdf_path, _, _ = build_output_paths(
+    baseline_pdf_path, _, _, _ = build_output_paths(
         input_epub=input_epub,
         output_dir=output_dir,
         used_title=used_title,
@@ -311,7 +309,9 @@ def render_baseline_pdf(
         epub_path=input_epub,
         output_pdf_path=baseline_pdf_path,
         output_docx_path=None,
+        output_markdown_path=None,
         export_docx=False,
+        export_markdown=False,
         title=used_title,
         author=used_author,
         settings=settings,
@@ -329,6 +329,7 @@ def run_processing(
     output_dir: Path,
     variant: str,
     export_docx: bool,
+    export_markdown: bool,
     paragraph_spacing_mode: str,
     margin_preset: str,
     imposition_mode: str,
@@ -359,7 +360,7 @@ def run_processing(
     used_title = epub_content.detected_title
     used_author = epub_content.detected_author
 
-    output_pdf_path, output_docx_path, file_stem = build_output_paths(
+    output_pdf_path, output_docx_path, output_markdown_path, file_stem = build_output_paths(
         input_epub=input_epub,
         output_dir=output_dir,
         used_title=used_title,
@@ -375,6 +376,8 @@ def run_processing(
     log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
     log(f"Margin preset: {describe_margin_preset(margin_preset)}")
     log(f"Imposition mode: {describe_imposition_mode(imposition_mode)}")
+    log(f"DOCX export: {'Yes (Word / LibreOffice)' if export_docx else 'No'}")
+    log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
 
     if create_imposed_pdf:
         log(f"Pages per signature: {imposed_pages_per_signature}")
@@ -410,7 +413,9 @@ def run_processing(
         epub_path=input_epub,
         output_pdf_path=output_pdf_path,
         output_docx_path=output_docx_path if export_docx else None,
+        output_markdown_path=output_markdown_path if export_markdown else None,
         export_docx=export_docx,
+        export_markdown=export_markdown,
         title=used_title,
         author=used_author,
         settings=layout_settings,
@@ -421,6 +426,7 @@ def run_processing(
     input_size_mb = file_size_mb(input_epub)
     pdf_size_mb = file_size_mb(result.output_pdf)
     docx_size_mb = file_size_mb(result.output_docx) if result.output_docx else None
+    markdown_size_mb = file_size_mb(result.output_markdown) if result.output_markdown else None
     output_pdf_pages = pdf_page_count(result.output_pdf)
 
     page_delta = None
@@ -463,14 +469,11 @@ def run_processing(
         imposed_signature_settings_pages = signature_settings.pages_per_signature
 
         log(f"Imposed PDF created: {imposed_output_pdf}")
-        log(
-            f"Imposition: {signature_settings.pages_per_signature} pages/signature, "
-            f"{describe_binding_direction(signature_settings.binding_direction)}"
-        )
 
     return {
         "output_pdf": str(result.output_pdf),
         "output_docx": str(result.output_docx) if result.output_docx else "",
+        "output_markdown": str(result.output_markdown) if result.output_markdown else "",
         "title": result.used_title,
         "author": result.used_author,
         "output_dir": str(result.output_dir),
@@ -481,6 +484,7 @@ def run_processing(
         "input_size_mb": input_size_mb,
         "pdf_size_mb": pdf_size_mb,
         "docx_size_mb": docx_size_mb,
+        "markdown_size_mb": markdown_size_mb,
         "output_pdf_pages": output_pdf_pages,
         "preview_samples": preview_samples,
         "preview_sample_count": len(preview_samples),
@@ -506,4 +510,6 @@ def run_processing(
         "imposed_total_signatures": imposed_total_signatures,
         "imposed_output_sheet_sides": imposed_output_sheet_sides,
         "imposed_physical_sheets_total": imposed_physical_sheets_total,
+        "export_docx": export_docx,
+        "export_markdown": export_markdown,
     }
