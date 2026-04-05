@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -17,7 +16,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -142,11 +140,6 @@ QTextEdit#afterPreview {
     background: #ffffff;
 }
 
-QFrame#divider {
-    background: #d9dde3;
-    max-height: 1px;
-}
-
 QCheckBox {
     spacing: 8px;
 }
@@ -155,11 +148,6 @@ QCheckBox::indicator {
     width: 16px;
     height: 16px;
 }
-
-QLabel.sectionHint {
-    color: #667085;
-    font-size: 10pt;
-}
 """
 
 
@@ -167,7 +155,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(1160, 860)
+        self.resize(1180, 920)
         self.setStyleSheet(APP_STYLESHEET)
 
         self.thread: QThread | None = None
@@ -196,6 +184,18 @@ class MainWindow(QMainWindow):
         self.margin_preset_combo.addItem("Wide", "wide")
         self.margin_preset_combo.addItem("Large print friendly", "large-print")
 
+        self.create_imposed_checkbox = QCheckBox("Also create imposed signature PDF")
+        self.create_imposed_checkbox.setChecked(False)
+
+        self.signature_pages_combo = QComboBox()
+        for pages in (4, 8, 16, 20, 24, 32):
+            self.signature_pages_combo.addItem(str(pages), pages)
+        self.signature_pages_combo.setCurrentIndex(2)
+
+        self.binding_direction_combo = QComboBox()
+        self.binding_direction_combo.addItem("Left-to-right", "ltr")
+        self.binding_direction_combo.addItem("Right-to-left", "rtl")
+
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setMinimumHeight(150)
@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
         self.results_box = QTextEdit()
         self.results_box.setObjectName("resultsBox")
         self.results_box.setReadOnly(True)
-        self.results_box.setMaximumHeight(280)
+        self.results_box.setMaximumHeight(320)
 
         self.before_preview = QTextEdit()
         self.before_preview.setObjectName("beforePreview")
@@ -217,13 +217,12 @@ class MainWindow(QMainWindow):
         self.title_label.setObjectName("titleLabel")
 
         self.subtitle_label = QLabel(
-            "Convert EPUBs into cleaner print-ready PDF and DOCX interiors."
+            "Convert EPUBs into cleaner print-ready interiors and optional imposed signature PDFs."
         )
         self.subtitle_label.setObjectName("subtitleLabel")
 
         self.preview_heading_label = QLabel("Text preview sample: none")
         self.preview_index_label = QLabel("0 / 0")
-
         self.status_label = QLabel("Ready to process an EPUB")
         self.status_label.setObjectName("statusLabel")
 
@@ -241,6 +240,9 @@ class MainWindow(QMainWindow):
         self.open_docx_btn = QPushButton("Open DOCX")
         self.open_docx_btn.setEnabled(False)
 
+        self.open_imposed_btn = QPushButton("Open Imposed PDF")
+        self.open_imposed_btn.setEnabled(False)
+
         self.prev_preview_btn = QPushButton("Previous")
         self.next_preview_btn = QPushButton("Next")
         self.prev_preview_btn.setEnabled(False)
@@ -249,11 +251,13 @@ class MainWindow(QMainWindow):
         self.last_output_dir: str | None = None
         self.last_output_pdf: str | None = None
         self.last_output_docx: str | None = None
+        self.last_imposed_pdf: str | None = None
         self.preview_samples: list[dict[str, str]] = []
         self.current_preview_index = 0
 
         self._build_ui()
         self._connect_signals()
+        self._update_imposition_controls()
 
         default_output = Path.cwd()
         self.output_edit.setText(str(default_output))
@@ -276,10 +280,8 @@ class MainWindow(QMainWindow):
 
         top_row = QHBoxLayout()
         top_row.setSpacing(14)
-
         top_row.addWidget(self._build_book_group(), 3)
         top_row.addWidget(self._build_cleanup_group(), 2)
-
         root.addLayout(top_row)
 
         action_row = QHBoxLayout()
@@ -287,6 +289,7 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.open_output_btn)
         action_row.addWidget(self.open_pdf_btn)
         action_row.addWidget(self.open_docx_btn)
+        action_row.addWidget(self.open_imposed_btn)
         action_row.addStretch()
         action_row.addWidget(self.process_btn)
         root.addLayout(action_row)
@@ -301,50 +304,45 @@ class MainWindow(QMainWindow):
         layout.setHorizontalSpacing(10)
         layout.setVerticalSpacing(10)
 
-        input_hint = QLabel("Choose the source EPUB and where outputs should be saved.")
-        input_hint.setProperty("class", "sectionHint")
-        input_hint.setWordWrap(True)
+        layout.addWidget(QLabel("Input EPUB"), 0, 0)
+        layout.addWidget(self.input_edit, 0, 1)
+        layout.addWidget(self.browse_input_btn, 0, 2)
 
-        layout.addWidget(input_hint, 0, 0, 1, 3)
-
-        layout.addWidget(QLabel("Input EPUB"), 1, 0)
-        layout.addWidget(self.input_edit, 1, 1)
-        layout.addWidget(self.browse_input_btn, 1, 2)
-
-        layout.addWidget(QLabel("Output folder"), 2, 0)
-        layout.addWidget(self.output_edit, 2, 1)
-        layout.addWidget(self.browse_output_btn, 2, 2)
+        layout.addWidget(QLabel("Output folder"), 1, 0)
+        layout.addWidget(self.output_edit, 1, 1)
+        layout.addWidget(self.browse_output_btn, 1, 2)
 
         layout.setColumnStretch(1, 1)
         return group
 
     def _build_cleanup_group(self) -> QGroupBox:
-        group = QGroupBox("Cleanup and layout")
+        group = QGroupBox("Cleanup, layout, and binding")
         layout = QGridLayout(group)
         layout.setHorizontalSpacing(10)
         layout.setVerticalSpacing(10)
 
-        hint = QLabel("Choose cleanup intensity, paragraph style, and margin preset.")
-        hint.setProperty("class", "sectionHint")
-        hint.setWordWrap(True)
+        layout.addWidget(QLabel("Cleanup mode"), 0, 0)
+        layout.addWidget(self.variant_combo, 0, 1)
 
-        layout.addWidget(hint, 0, 0, 1, 2)
+        layout.addWidget(QLabel("Paragraph spacing"), 1, 0)
+        layout.addWidget(self.spacing_mode_combo, 1, 1)
 
-        layout.addWidget(QLabel("Cleanup mode"), 1, 0)
-        layout.addWidget(self.variant_combo, 1, 1)
+        layout.addWidget(QLabel("Margins"), 2, 0)
+        layout.addWidget(self.margin_preset_combo, 2, 1)
 
-        layout.addWidget(QLabel("Paragraph spacing"), 2, 0)
-        layout.addWidget(self.spacing_mode_combo, 2, 1)
-
-        layout.addWidget(QLabel("Margins"), 3, 0)
-        layout.addWidget(self.margin_preset_combo, 3, 1)
-
-        layout.addWidget(QLabel("Options"), 4, 0)
+        layout.addWidget(QLabel("Options"), 3, 0)
         options_layout = QVBoxLayout()
         options_layout.setContentsMargins(0, 0, 0, 0)
         options_layout.setSpacing(6)
         options_layout.addWidget(self.export_docx_checkbox)
-        layout.addLayout(options_layout, 4, 1)
+        options_layout.addWidget(self.create_imposed_checkbox)
+        layout.addLayout(options_layout, 3, 1)
+
+        layout.addWidget(QLabel("Pages per signature"), 4, 0)
+        layout.addWidget(self.signature_pages_combo, 4, 1)
+
+        layout.addWidget(QLabel("Binding direction"), 5, 0)
+        layout.addWidget(self.binding_direction_combo, 5, 1)
 
         layout.setColumnStretch(1, 1)
         return group
@@ -352,13 +350,6 @@ class MainWindow(QMainWindow):
     def _build_results_group(self) -> QGroupBox:
         group = QGroupBox("Results")
         layout = QVBoxLayout(group)
-        layout.setSpacing(8)
-
-        hint = QLabel("Summary of the generated files, layout impact, and comparison stats.")
-        hint.setProperty("class", "sectionHint")
-        hint.setWordWrap(True)
-
-        layout.addWidget(hint)
         layout.addWidget(self.results_box)
         return group
 
@@ -373,40 +364,28 @@ class MainWindow(QMainWindow):
         top.addWidget(self.prev_preview_btn)
         top.addWidget(self.next_preview_btn)
         top.addWidget(self.preview_index_label)
-
         layout.addLayout(top)
 
         preview_row = QHBoxLayout()
         preview_row.setSpacing(12)
 
         before_col = QVBoxLayout()
-        before_label = QLabel("Before")
-        before_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        before_col.addWidget(before_label)
+        before_col.addWidget(QLabel("Before"))
         before_col.addWidget(self.before_preview)
 
         after_col = QVBoxLayout()
-        after_label = QLabel("After")
-        after_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        after_col.addWidget(after_label)
+        after_col.addWidget(QLabel("After"))
         after_col.addWidget(self.after_preview)
 
         preview_row.addLayout(before_col, 1)
         preview_row.addLayout(after_col, 1)
-
         layout.addLayout(preview_row)
+
         return group
 
     def _build_log_group(self) -> QGroupBox:
         group = QGroupBox("Processing log")
         layout = QVBoxLayout(group)
-        layout.setSpacing(8)
-
-        hint = QLabel("Detailed processing messages and diagnostics.")
-        hint.setProperty("class", "sectionHint")
-        hint.setWordWrap(True)
-
-        layout.addWidget(hint)
         layout.addWidget(self.log_box)
         return group
 
@@ -417,8 +396,15 @@ class MainWindow(QMainWindow):
         self.open_output_btn.clicked.connect(self._open_output_folder)
         self.open_pdf_btn.clicked.connect(self._open_pdf)
         self.open_docx_btn.clicked.connect(self._open_docx)
+        self.open_imposed_btn.clicked.connect(self._open_imposed_pdf)
         self.prev_preview_btn.clicked.connect(self._show_previous_preview)
         self.next_preview_btn.clicked.connect(self._show_next_preview)
+        self.create_imposed_checkbox.toggled.connect(self._update_imposition_controls)
+
+    def _update_imposition_controls(self) -> None:
+        enabled = self.create_imposed_checkbox.isChecked()
+        self.signature_pages_combo.setEnabled(enabled)
+        self.binding_direction_combo.setEnabled(enabled)
 
     def _browse_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -452,6 +438,9 @@ class MainWindow(QMainWindow):
         self.export_docx_checkbox.setEnabled(not busy)
         self.spacing_mode_combo.setEnabled(not busy)
         self.margin_preset_combo.setEnabled(not busy)
+        self.create_imposed_checkbox.setEnabled(not busy)
+        self.signature_pages_combo.setEnabled(not busy and self.create_imposed_checkbox.isChecked())
+        self.binding_direction_combo.setEnabled(not busy and self.create_imposed_checkbox.isChecked())
 
     def _reset_results_ui(self) -> None:
         self.results_box.clear()
@@ -466,9 +455,11 @@ class MainWindow(QMainWindow):
         self.last_output_dir = None
         self.last_output_pdf = None
         self.last_output_docx = None
+        self.last_imposed_pdf = None
         self.open_output_btn.setEnabled(False)
         self.open_pdf_btn.setEnabled(False)
         self.open_docx_btn.setEnabled(False)
+        self.open_imposed_btn.setEnabled(False)
 
     def _start_processing(self) -> None:
         input_path = self.input_edit.text().strip()
@@ -477,6 +468,9 @@ class MainWindow(QMainWindow):
         export_docx = self.export_docx_checkbox.isChecked()
         paragraph_spacing_mode = self.spacing_mode_combo.currentData()
         margin_preset = self.margin_preset_combo.currentData()
+        create_imposed_pdf = self.create_imposed_checkbox.isChecked()
+        imposed_pages_per_signature = self.signature_pages_combo.currentData()
+        binding_direction = self.binding_direction_combo.currentData()
 
         if not input_path:
             QMessageBox.warning(self, "Missing input", "Please choose an EPUB file.")
@@ -484,6 +478,10 @@ class MainWindow(QMainWindow):
 
         if not Path(input_path).exists():
             QMessageBox.warning(self, "Invalid input", "The selected EPUB file does not exist.")
+            return
+
+        if Path(input_path).suffix.lower() != ".epub":
+            QMessageBox.warning(self, "Invalid input", "Please choose a file with the .epub extension.")
             return
 
         if not output_dir:
@@ -504,6 +502,9 @@ class MainWindow(QMainWindow):
             export_docx=export_docx,
             paragraph_spacing_mode=paragraph_spacing_mode,
             margin_preset=margin_preset,
+            create_imposed_pdf=create_imposed_pdf,
+            imposed_pages_per_signature=int(imposed_pages_per_signature),
+            binding_direction=binding_direction,
         )
         self.worker.moveToThread(self.thread)
 
@@ -571,6 +572,19 @@ class MainWindow(QMainWindow):
                 f"PDF size delta vs baseline: {self._format_signed_float(payload.get('size_delta_mb_vs_baseline'))}",
             ])
 
+        if payload.get("create_imposed_pdf"):
+            lines.extend([
+                "",
+                "Imposed signature PDF:",
+                f"Imposed PDF: {payload.get('imposed_output_pdf', '')}",
+                f"Pages per signature: {payload.get('imposed_pages_per_signature', 'N/A')}",
+                f"Binding direction: {payload.get('binding_direction_label', '')}",
+                f"Blank pages added: {payload.get('imposed_blank_pages_added', 'N/A')}",
+                f"Total signatures: {payload.get('imposed_total_signatures', 'N/A')}",
+                f"Output sheet sides: {payload.get('imposed_output_sheet_sides', 'N/A')}",
+                f"Physical sheets total: {payload.get('imposed_physical_sheets_total', 'N/A')}",
+            ])
+
         lines.extend([
             "",
             f"Text cleanup preview changes found: {payload.get('preview_sample_count', 0)}",
@@ -582,10 +596,12 @@ class MainWindow(QMainWindow):
         self.last_output_dir = payload.get("output_dir", "")
         self.last_output_pdf = payload.get("output_pdf", "")
         self.last_output_docx = payload.get("output_docx", "")
+        self.last_imposed_pdf = payload.get("imposed_output_pdf", "")
 
         self.open_output_btn.setEnabled(bool(self.last_output_dir))
         self.open_pdf_btn.setEnabled(bool(self.last_output_pdf))
         self.open_docx_btn.setEnabled(bool(self.last_output_docx))
+        self.open_imposed_btn.setEnabled(bool(self.last_imposed_pdf))
 
         self.results_box.setPlainText(self._build_results_text(payload))
 
@@ -609,7 +625,7 @@ class MainWindow(QMainWindow):
             self.preview_index_label.setText("0 / 0")
             self.before_preview.setPlainText("No text cleanup preview samples were found.")
             self.after_preview.setPlainText(
-                "This can still be normal if the visible difference is mainly layout, spacing, margins, or pagination."
+                "This can still be normal if the visible difference is mainly layout, spacing, margins, or signature imposition."
             )
             self.prev_preview_btn.setEnabled(False)
             self.next_preview_btn.setEnabled(False)
@@ -667,6 +683,17 @@ class MainWindow(QMainWindow):
         path = Path(self.last_output_docx)
         if not path.exists():
             QMessageBox.warning(self, "Missing file", "The DOCX file no longer exists.")
+            return
+
+        os.startfile(str(path))
+
+    def _open_imposed_pdf(self) -> None:
+        if not self.last_imposed_pdf:
+            return
+
+        path = Path(self.last_imposed_pdf)
+        if not path.exists():
+            QMessageBox.warning(self, "Missing file", "The imposed PDF file no longer exists.")
             return
 
         os.startfile(str(path))
