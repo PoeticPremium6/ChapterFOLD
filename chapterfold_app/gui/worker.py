@@ -23,6 +23,7 @@ class Worker(QObject):
         output_dir: str,
         variant: str,
         export_docx: bool,
+        export_markdown: bool,
         paragraph_spacing_mode: str,
         margin_preset: str,
         imposition_mode: str,
@@ -35,6 +36,7 @@ class Worker(QObject):
         self.output_dir = output_dir
         self.variant = variant
         self.export_docx = export_docx
+        self.export_markdown = export_markdown
         self.paragraph_spacing_mode = paragraph_spacing_mode
         self.margin_preset = margin_preset
         self.imposition_mode = imposition_mode
@@ -50,6 +52,7 @@ class Worker(QObject):
                 output_dir=Path(self.output_dir),
                 variant=self.variant,
                 export_docx=self.export_docx,
+                export_markdown=self.export_markdown,
                 paragraph_spacing_mode=self.paragraph_spacing_mode,
                 margin_preset=self.margin_preset,
                 imposition_mode=self.imposition_mode,
