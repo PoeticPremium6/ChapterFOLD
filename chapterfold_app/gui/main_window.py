@@ -3,9 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QGridLayout,
@@ -16,6 +15,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -26,122 +27,138 @@ from gui.worker import Worker
 
 APP_STYLESHEET = """
 QMainWindow {
-    background: #f5f6f8;
+    background: #f6f2fb;
 }
 
 QWidget {
     font-size: 11pt;
-    color: #222222;
+    color: #231b2f;
+    font-family: "Segoe UI", "Inter", sans-serif;
 }
 
 QGroupBox {
     background: #ffffff;
-    border: 1px solid #d9dde3;
-    border-radius: 10px;
+    border: 1px solid #dfd4ee;
+    border-radius: 14px;
     margin-top: 12px;
-    font-weight: 600;
-    padding-top: 10px;
+    font-weight: 700;
+    padding-top: 12px;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 6px;
-    color: #2d3748;
+    color: #5a2a82;
 }
 
 QLabel#titleLabel {
-    font-size: 22pt;
-    font-weight: 700;
-    color: #1f2937;
+    font-size: 24pt;
+    font-weight: 800;
+    color: #4b1f6f;
 }
 
 QLabel#subtitleLabel {
     font-size: 10pt;
-    color: #667085;
+    color: #7a6a8c;
 }
 
 QLabel#statusLabel {
-    background: #eef2f7;
-    border: 1px solid #d9dde3;
-    border-radius: 8px;
-    padding: 8px 10px;
-    color: #334155;
-    font-weight: 500;
+    background: #efe7f8;
+    border: 1px solid #dcccf0;
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: #4b2f63;
+    font-weight: 600;
+}
+
+QLabel#sectionHintLabel {
+    color: #7a6a8c;
+    font-size: 10pt;
 }
 
 QLineEdit,
 QComboBox,
 QTextEdit {
     background: #ffffff;
-    border: 1px solid #cfd6df;
-    border-radius: 8px;
+    border: 1px solid #d8cbe8;
+    border-radius: 10px;
     padding: 8px 10px;
-    selection-background-color: #cfe3ff;
+    selection-background-color: #d9b8ff;
 }
 
 QLineEdit:focus,
 QComboBox:focus,
 QTextEdit:focus {
-    border: 1px solid #6b9cff;
+    border: 1px solid #8b4fd8;
 }
 
 QComboBox {
-    min-height: 22px;
+    min-height: 24px;
 }
 
 QComboBox::drop-down {
     border: none;
-    width: 24px;
+    width: 28px;
 }
 
 QPushButton {
     background: #ffffff;
-    border: 1px solid #cfd6df;
-    border-radius: 8px;
-    padding: 8px 14px;
-    min-height: 18px;
-}
-
-QPushButton:hover {
-    background: #f3f6fb;
-}
-
-QPushButton:pressed {
-    background: #e9eef7;
-}
-
-QPushButton:disabled {
-    color: #97a3b6;
-    background: #f7f8fa;
-}
-
-QPushButton#primaryButton {
-    background: #1f6feb;
-    color: white;
-    border: 1px solid #1f6feb;
+    border: 1px solid #d8cbe8;
+    border-radius: 10px;
+    padding: 9px 14px;
+    min-height: 20px;
     font-weight: 600;
 }
 
+QPushButton:hover {
+    background: #f7f1fc;
+}
+
+QPushButton:pressed {
+    background: #efe5f9;
+}
+
+QPushButton:disabled {
+    color: #ab9cbb;
+    background: #faf8fc;
+}
+
+QPushButton#primaryButton {
+    background: #7b2cbf;
+    color: white;
+    border: 1px solid #7b2cbf;
+    font-weight: 700;
+}
+
 QPushButton#primaryButton:hover {
-    background: #1a62d0;
+    background: #6f24ad;
 }
 
 QPushButton#primaryButton:pressed {
-    background: #1656b8;
+    background: #611f98;
 }
 
 QTextEdit#resultsBox {
-    background: #fbfcfe;
+    background: #fcfafe;
 }
 
 QTextEdit#beforePreview,
-QTextEdit#afterPreview {
+QTextEdit#afterPreview,
+QTextEdit#logBox {
     background: #ffffff;
 }
 
-QCheckBox {
-    spacing: 8px;
+QSplitter::handle {
+    background: #e8ddf4;
+}
+
+QSplitter::handle:horizontal {
+    width: 8px;
+}
+
+QSplitter::handle:vertical {
+    height: 8px;
 }
 """
 
@@ -150,7 +167,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(1200, 950)
+        self.resize(1260, 980)
+        self.setMinimumSize(1080, 780)
         self.setStyleSheet(APP_STYLESHEET)
 
         self.thread: QThread | None = None
@@ -164,7 +182,8 @@ class MainWindow(QMainWindow):
         self.variant_combo.addItem("Dialogue Merge", "paragraph-dialogue-merge")
         self.variant_combo.addItem("Aggressive Cleanup", "aggressive-cleanup")
 
-        self.export_docx_checkbox = QCheckBox("Also export DOCX")
+        self.export_docx_checkbox = QPushButton("Also export DOCX")
+        self.export_docx_checkbox.setCheckable(True)
         self.export_docx_checkbox.setChecked(True)
 
         self.spacing_mode_combo = QComboBox()
@@ -200,13 +219,14 @@ class MainWindow(QMainWindow):
         self.max_end_padding_combo.addItem("12", 12)
 
         self.log_box = QTextEdit()
+        self.log_box.setObjectName("logBox")
         self.log_box.setReadOnly(True)
-        self.log_box.setMinimumHeight(150)
+        self.log_box.setMinimumHeight(180)
 
         self.results_box = QTextEdit()
         self.results_box.setObjectName("resultsBox")
         self.results_box.setReadOnly(True)
-        self.results_box.setMaximumHeight(340)
+        self.results_box.setMinimumHeight(180)
 
         self.before_preview = QTextEdit()
         self.before_preview.setObjectName("beforePreview")
@@ -264,6 +284,12 @@ class MainWindow(QMainWindow):
         default_output = Path.cwd()
         self.output_edit.setText(str(default_output))
 
+    def _hint_label(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("sectionHintLabel")
+        label.setWordWrap(True)
+        return label
+
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
@@ -280,11 +306,13 @@ class MainWindow(QMainWindow):
 
         root.addWidget(self.status_label)
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(14)
-        top_row.addWidget(self._build_book_group(), 3)
-        top_row.addWidget(self._build_cleanup_group(), 2)
-        root.addLayout(top_row)
+        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        top_splitter.addWidget(self._build_book_group())
+        top_splitter.addWidget(self._build_cleanup_group())
+        top_splitter.setStretchFactor(0, 3)
+        top_splitter.setStretchFactor(1, 2)
+        top_splitter.setSizes([700, 500])
+        root.addWidget(top_splitter, 0)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
@@ -296,60 +324,84 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.process_btn)
         root.addLayout(action_row)
 
-        root.addWidget(self._build_results_group())
-        root.addWidget(self._build_preview_group(), 1)
-        root.addWidget(self._build_log_group())
+        lower_splitter = QSplitter(Qt.Orientation.Vertical)
+        lower_splitter.addWidget(self._build_results_group())
+        lower_splitter.addWidget(self._build_preview_group())
+        lower_splitter.addWidget(self._build_log_group())
+        lower_splitter.setStretchFactor(0, 2)
+        lower_splitter.setStretchFactor(1, 4)
+        lower_splitter.setStretchFactor(2, 3)
+        lower_splitter.setSizes([220, 360, 240])
+        root.addWidget(lower_splitter, 1)
 
     def _build_book_group(self) -> QGroupBox:
         group = QGroupBox("Book")
+        group.setMinimumWidth(520)
+        group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
         layout = QGridLayout(group)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(10)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(12)
 
-        layout.addWidget(QLabel("Input EPUB"), 0, 0)
-        layout.addWidget(self.input_edit, 0, 1)
-        layout.addWidget(self.browse_input_btn, 0, 2)
+        layout.addWidget(
+            self._hint_label("Choose the source EPUB and where the outputs should be saved."),
+            0,
+            0,
+            1,
+            3,
+        )
 
-        layout.addWidget(QLabel("Output folder"), 1, 0)
-        layout.addWidget(self.output_edit, 1, 1)
-        layout.addWidget(self.browse_output_btn, 1, 2)
+        layout.addWidget(QLabel("Input EPUB"), 1, 0)
+        layout.addWidget(self.input_edit, 1, 1)
+        layout.addWidget(self.browse_input_btn, 1, 2)
+
+        layout.addWidget(QLabel("Output folder"), 2, 0)
+        layout.addWidget(self.output_edit, 2, 1)
+        layout.addWidget(self.browse_output_btn, 2, 2)
 
         layout.setColumnStretch(1, 1)
         return group
 
     def _build_cleanup_group(self) -> QGroupBox:
         group = QGroupBox("Cleanup, layout, and binding")
+        group.setMinimumWidth(420)
+        group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
         layout = QGridLayout(group)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(10)
+        layout.setHorizontalSpacing(12)
+        layout.setVerticalSpacing(12)
 
-        layout.addWidget(QLabel("Cleanup mode"), 0, 0)
-        layout.addWidget(self.variant_combo, 0, 1)
+        layout.addWidget(
+            self._hint_label("Choose cleanup strength, typography, and optional signature imposition."),
+            0,
+            0,
+            1,
+            2,
+        )
 
-        layout.addWidget(QLabel("Paragraph spacing"), 1, 0)
-        layout.addWidget(self.spacing_mode_combo, 1, 1)
+        layout.addWidget(QLabel("Cleanup mode"), 1, 0)
+        layout.addWidget(self.variant_combo, 1, 1)
 
-        layout.addWidget(QLabel("Margins"), 2, 0)
-        layout.addWidget(self.margin_preset_combo, 2, 1)
+        layout.addWidget(QLabel("Paragraph spacing"), 2, 0)
+        layout.addWidget(self.spacing_mode_combo, 2, 1)
 
-        layout.addWidget(QLabel("Options"), 3, 0)
-        options_layout = QVBoxLayout()
-        options_layout.setContentsMargins(0, 0, 0, 0)
-        options_layout.setSpacing(6)
-        options_layout.addWidget(self.export_docx_checkbox)
-        layout.addLayout(options_layout, 3, 1)
+        layout.addWidget(QLabel("Margins"), 3, 0)
+        layout.addWidget(self.margin_preset_combo, 3, 1)
 
-        layout.addWidget(QLabel("Imposition output"), 4, 0)
-        layout.addWidget(self.imposition_mode_combo, 4, 1)
+        layout.addWidget(QLabel("Options"), 4, 0)
+        layout.addWidget(self.export_docx_checkbox, 4, 1)
 
-        layout.addWidget(QLabel("Pages per signature"), 5, 0)
-        layout.addWidget(self.signature_pages_combo, 5, 1)
+        layout.addWidget(QLabel("Imposition output"), 5, 0)
+        layout.addWidget(self.imposition_mode_combo, 5, 1)
 
-        layout.addWidget(QLabel("Binding direction"), 6, 0)
-        layout.addWidget(self.binding_direction_combo, 6, 1)
+        layout.addWidget(QLabel("Pages per signature"), 6, 0)
+        layout.addWidget(self.signature_pages_combo, 6, 1)
 
-        layout.addWidget(QLabel("Max blank end pages"), 7, 0)
-        layout.addWidget(self.max_end_padding_combo, 7, 1)
+        layout.addWidget(QLabel("Binding direction"), 7, 0)
+        layout.addWidget(self.binding_direction_combo, 7, 1)
+
+        layout.addWidget(QLabel("Max blank end pages"), 8, 0)
+        layout.addWidget(self.max_end_padding_combo, 8, 1)
 
         layout.setColumnStretch(1, 1)
         return group
@@ -357,6 +409,8 @@ class MainWindow(QMainWindow):
     def _build_results_group(self) -> QGroupBox:
         group = QGroupBox("Results")
         layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+        layout.addWidget(self._hint_label("Summary of generated files, layout impact, and imposition details."))
         layout.addWidget(self.results_box)
         return group
 
@@ -373,26 +427,34 @@ class MainWindow(QMainWindow):
         top.addWidget(self.preview_index_label)
         layout.addLayout(top)
 
-        preview_row = QHBoxLayout()
-        preview_row.setSpacing(12)
+        preview_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        before_col = QVBoxLayout()
-        before_col.addWidget(QLabel("Before"))
-        before_col.addWidget(self.before_preview)
+        before_container = QWidget()
+        before_layout = QVBoxLayout(before_container)
+        before_layout.setContentsMargins(0, 0, 0, 0)
+        before_layout.addWidget(QLabel("Before"))
+        before_layout.addWidget(self.before_preview)
 
-        after_col = QVBoxLayout()
-        after_col.addWidget(QLabel("After"))
-        after_col.addWidget(self.after_preview)
+        after_container = QWidget()
+        after_layout = QVBoxLayout(after_container)
+        after_layout.setContentsMargins(0, 0, 0, 0)
+        after_layout.addWidget(QLabel("After"))
+        after_layout.addWidget(self.after_preview)
 
-        preview_row.addLayout(before_col, 1)
-        preview_row.addLayout(after_col, 1)
-        layout.addLayout(preview_row)
+        preview_splitter.addWidget(before_container)
+        preview_splitter.addWidget(after_container)
+        preview_splitter.setStretchFactor(0, 1)
+        preview_splitter.setStretchFactor(1, 1)
+        preview_splitter.setSizes([500, 500])
 
+        layout.addWidget(preview_splitter)
         return group
 
     def _build_log_group(self) -> QGroupBox:
         group = QGroupBox("Processing log")
         layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+        layout.addWidget(self._hint_label("Detailed processing messages and errors appear here."))
         layout.addWidget(self.log_box)
         return group
 
