@@ -1,418 +1,289 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import html
-import re
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import Optional
 
-from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
-from ebooklib import ITEM_DOCUMENT, epub
-
-from core.naming import build_book_slug, interior_pdf_name, output_dir_for_book
-
-warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
-
-try:
-    from weasyprint import HTML
-except Exception as e:
-    HTML = None
-    WEASYPRINT_IMPORT_ERROR = e
-else:
-    WEASYPRINT_IMPORT_ERROR = None
+from pypdf import PdfReader, PdfWriter, Transformation
+from pypdf._page import PageObject
 
 
-DEFAULT_FONT_STACK = '"Garamond", "EB Garamond", "Cormorant Garamond", serif'
+DEFAULT_SHEETS_PER_SIGNATURE = 4
 
 
-@dataclass
-class LayoutSettings:
-    trim_width_cm: float = 15.24
-    trim_height_cm: float = 22.86
-    margin_top_cm: float = 1.5
-    margin_bottom_cm: float = 1.5
-    margin_inside_cm: float = 1.8
-    margin_outside_cm: float = 1.0
-    font_size_pt: float = 11.5
-    line_height: float = 1.35
-    font_family: str = DEFAULT_FONT_STACK
-    drop_notes: bool = False
+@dataclass(frozen=True)
+class SignatureSettings:
+    sheets_per_signature: int
+    pages_per_signature: int
+    max_end_padding: int | None = None
+    binding_direction: str = "ltr"
 
 
-@dataclass
-class EpubContent:
-    detected_title: str
-    detected_author: str
-    sections: List[Tuple[str, str]]
-
-
-@dataclass
-class EpubToPdfResult:
-    input_epub: Path
-    output_dir: Path
+@dataclass(frozen=True)
+class ImpositionResult:
+    input_pdf: Path
     output_pdf: Path
-    book_slug: str
-    detected_title: str
-    detected_author: str
-    used_title: str
-    used_author: str
+    input_pages: int
+    blank_pages_added: int
+    output_sheet_sides: int
+    physical_sheets_total: int
+    total_signatures: int
+    settings: SignatureSettings
 
 
-def cm(value: float) -> str:
-    return f"{value:.3f}cm"
+def next_multiple(n: int, m: int) -> int:
+    if m <= 0:
+        raise ValueError("Multiple must be greater than 0")
+    return ((n + m - 1) // m) * m
 
 
-def get_metadata(book: epub.EpubBook) -> Tuple[str, str]:
-    title = "Unknown Title"
-    author = "Unknown Author"
-
-    title_meta = book.get_metadata("DC", "title")
-    if title_meta and title_meta[0] and title_meta[0][0]:
-        title = str(title_meta[0][0]).strip()
-
-    creator_meta = book.get_metadata("DC", "creator")
-    if creator_meta and creator_meta[0] and creator_meta[0][0]:
-        author = str(creator_meta[0][0]).strip()
-
-    return title, author
+def pages_from_sheets(sheets_per_signature: int) -> int:
+    if sheets_per_signature <= 0:
+        raise ValueError("Sheets per signature must be greater than 0")
+    return sheets_per_signature * 4
 
 
-def load_epub_content(epub_path: Path) -> EpubContent:
-    book = epub.read_epub(str(epub_path))
-    title, author = get_metadata(book)
-    sections: List[Tuple[str, str]] = []
+def resolve_signature_size(
+    sheets_per_signature: Optional[int],
+    pages_per_signature: Optional[int],
+) -> tuple[int, int]:
+    if sheets_per_signature is not None and pages_per_signature is not None:
+        expected_pages = pages_from_sheets(sheets_per_signature)
+        if pages_per_signature != expected_pages:
+            raise ValueError(
+                f"Conflicting options: {sheets_per_signature} sheets/signature "
+                f"implies {expected_pages} pages/signature, not {pages_per_signature}"
+            )
+        return sheets_per_signature, pages_per_signature
 
-    for item in book.get_items_of_type(ITEM_DOCUMENT):
-        raw = item.get_content()
-        soup = BeautifulSoup(raw, "xml")
+    if sheets_per_signature is not None:
+        return sheets_per_signature, pages_from_sheets(sheets_per_signature)
 
-        for bad in soup(["script", "style"]):
-            bad.decompose()
+    if pages_per_signature is not None:
+        if pages_per_signature <= 0 or pages_per_signature % 4 != 0:
+            raise ValueError("Pages per signature must be a positive multiple of 4")
+        return pages_per_signature // 4, pages_per_signature
 
-        body = soup.find("body") or soup
+    return DEFAULT_SHEETS_PER_SIGNATURE, pages_from_sheets(DEFAULT_SHEETS_PER_SIGNATURE)
 
-        heading = ""
-        for tag in body.find_all(["h1", "h2", "h3"]):
-            txt = tag.get_text(" ", strip=True)
-            if txt:
-                heading = txt
-                break
 
-        body_html = "".join(str(x) for x in body.contents).strip()
-        if body_html:
-            sections.append((heading, body_html))
+def build_signature_settings(
+    *,
+    sheets_per_signature: int | None = None,
+    pages_per_signature: int | None = None,
+    max_end_padding: int | None = None,
+    binding_direction: str = "ltr",
+) -> SignatureSettings:
+    sheets, pages = resolve_signature_size(sheets_per_signature, pages_per_signature)
 
-    return EpubContent(
-        detected_title=title,
-        detected_author=author,
-        sections=sections,
+    direction = (binding_direction or "ltr").strip().lower()
+    if direction not in {"ltr", "rtl"}:
+        raise ValueError("Binding direction must be 'ltr' or 'rtl'")
+
+    if max_end_padding is not None and max_end_padding < 0:
+        raise ValueError("Max end padding cannot be negative")
+
+    return SignatureSettings(
+        sheets_per_signature=sheets,
+        pages_per_signature=pages,
+        max_end_padding=max_end_padding,
+        binding_direction=direction,
     )
 
 
-def sanitize_section_html(fragment: str, drop_notes: bool = False) -> str:
-    soup = BeautifulSoup(fragment, "xml")
+def signature_sheet_pairs(
+    pages_per_signature: int,
+) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    if pages_per_signature % 4 != 0:
+        raise ValueError("Pages per signature must be a multiple of 4")
 
-    selectors_to_drop = [
-        ".landmark",
-        ".actions",
-        ".download",
-        "nav",
-    ]
+    sheets: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    low = 1
+    high = pages_per_signature
 
-    if drop_notes:
-        selectors_to_drop.extend(
-            [
-                ".preface",
-                ".notes",
-                ".endnotes",
-                "#notes",
-                "#work_endnotes",
-            ]
-        )
+    while low < high:
+        front = (high, low)
+        back = (low + 1, high - 1)
+        sheets.append((front, back))
+        low += 2
+        high -= 2
 
-    for selector in selectors_to_drop:
-        for el in soup.select(selector):
-            el.decompose()
-
-    for p in soup.find_all("p"):
-        text = p.get_text(" ", strip=False)
-        text = re.sub(r"[ \t]+", " ", text)
-        text = re.sub(r"\n\s*\n+", "\n", text)
-        if text.strip():
-            p.clear()
-            p.append(text)
-        else:
-            p.decompose()
-
-    body = soup.find("body")
-    if body:
-        return "".join(str(x) for x in body.contents)
-    return "".join(str(x) for x in soup.contents)
+    return sheets
 
 
-def build_section_blocks(
-    sections: List[Tuple[str, str]],
-    drop_notes: bool,
-) -> List[str]:
-    blocks: List[str] = []
-    first_real_section = True
-
-    for heading, raw_html in sections:
-        cleaned = sanitize_section_html(raw_html, drop_notes=drop_notes)
-        if not cleaned.strip():
-            continue
-
-        heading_html = (
-            f"<h1 class='chapter-title'>{html.escape(heading)}</h1>" if heading else ""
-        )
-
-        chapter_class = "chapter first-body-chapter" if first_real_section else "chapter"
-        first_real_section = False
-
-        blocks.append(
-            f"""
-            <section class="{chapter_class}">
-              {heading_html}
-              {cleaned}
-            </section>
-            """
-        )
-
-    return blocks
+def make_blank_like(page: PageObject) -> PageObject:
+    return PageObject.create_blank_page(
+        width=float(page.mediabox.width),
+        height=float(page.mediabox.height),
+    )
 
 
-def build_css(settings: LayoutSettings) -> str:
-    return f"""
-    @page {{
-      size: {cm(settings.trim_width_cm)} {cm(settings.trim_height_cm)};
-      margin-top: {cm(settings.margin_top_cm)};
-      margin-bottom: {cm(settings.margin_bottom_cm)};
-      @bottom-center {{
-        content: counter(page);
-        font-size: 9pt;
-      }}
-    }}
+def get_page_or_blank(
+    reader: PdfReader,
+    one_based_index: int,
+    padded_total: int,
+    original_total: int,
+    template_page: PageObject,
+) -> PageObject:
+    if 1 <= one_based_index <= original_total:
+        return reader.pages[one_based_index - 1]
 
-    @page :right {{
-      margin-left: {cm(settings.margin_inside_cm)};
-      margin-right: {cm(settings.margin_outside_cm)};
-    }}
+    if 1 <= one_based_index <= padded_total:
+        return make_blank_like(template_page)
 
-    @page :left {{
-      margin-left: {cm(settings.margin_outside_cm)};
-      margin-right: {cm(settings.margin_inside_cm)};
-    }}
-
-    html {{
-      font-size: {settings.font_size_pt}pt;
-    }}
-
-    body {{
-      margin: 0;
-      padding: 0;
-      color: #111;
-      font-family: {settings.font_family};
-      line-height: {settings.line_height};
-      -weasy-bookmark-level: none;
-    }}
-
-    .title-page {{
-      break-after: page;
-      min-height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-    }}
-
-    .title-wrap h1 {{
-      margin: 0 0 0.45em 0;
-      font-size: {settings.font_size_pt * 2.0:.2f}pt;
-      line-height: 1.15;
-    }}
-
-    .title-wrap .author {{
-      margin: 0;
-      font-size: {settings.font_size_pt * 1.15:.2f}pt;
-    }}
-
-    .blank-page {{
-      break-after: page;
-    }}
-
-    .first-body-chapter {{
-      break-before: right;
-    }}
-
-    .chapter {{
-      break-before: page;
-    }}
-
-    .first-body-chapter.chapter {{
-      break-before: right;
-    }}
-
-    .chapter-title {{
-      text-align: center;
-      margin: 0 0 1.8em 0;
-      font-size: {settings.font_size_pt * 1.45:.2f}pt;
-      page-break-after: avoid;
-    }}
-
-    p {{
-      margin: 0 0 0.65em 0;
-      text-align: justify;
-      text-indent: 0;
-      orphans: 2;
-      widows: 2;
-    }}
-
-    .chapter p + p {{
-      text-indent: 1.2em;
-    }}
-
-    h1, h2, h3, h4 {{
-      page-break-after: avoid;
-    }}
-
-    em {{
-      font-style: italic;
-    }}
-
-    strong {{
-      font-weight: bold;
-    }}
-
-    hr {{
-      margin: 1.2em auto;
-      width: 25%;
-    }}
-    """
+    raise ValueError("Page index out of range")
 
 
-def build_html_document(
+def create_sheet_side(
+    first_page: PageObject,
+    second_page: PageObject,
     *,
-    title: str,
-    author: str,
-    sections: List[Tuple[str, str]],
-    settings: LayoutSettings,
-) -> str:
-    blocks = [
-        f"""
-        <section class="title-page">
-          <div class="title-wrap">
-            <h1>{html.escape(title)}</h1>
-            <p class="author">{html.escape(author)}</p>
-          </div>
-        </section>
-        """,
-        '<section class="blank-page" aria-hidden="true"></section>',
-        *build_section_blocks(sections, drop_notes=settings.drop_notes),
-    ]
-
-    css = build_css(settings)
-
-    return f"""
-    <!doctype html>
-    <html lang="en">
-    <head>
-      <meta charset="utf-8">
-      <title>{html.escape(title)}</title>
-      <style>{css}</style>
-    </head>
-    <body>
-      {''.join(blocks)}
-    </body>
-    </html>
+    binding_direction: str,
+) -> PageObject:
     """
+    Create one landscape sheet side from two portrait pages.
+
+    For left-to-right binding, page order is left then right.
+    For right-to-left binding, the side is mirrored.
+    """
+    w = float(first_page.mediabox.width)
+    h = float(first_page.mediabox.height)
+
+    sheet = PageObject.create_blank_page(width=w * 2, height=h)
+
+    if binding_direction == "rtl":
+        left_page = second_page
+        right_page = first_page
+    else:
+        left_page = first_page
+        right_page = second_page
+
+    sheet.merge_transformed_page(left_page, Transformation().translate(tx=0, ty=0))
+    sheet.merge_transformed_page(right_page, Transformation().translate(tx=w, ty=0))
+    return sheet
 
 
-def default_output_pdf_path(
-    epub_path: Path,
+def default_imposed_output_path(
+    input_pdf: Path,
     *,
-    used_title: str,
-    used_author: str,
+    pages_per_signature: int,
+    binding_direction: str,
 ) -> Path:
-    book_slug = build_book_slug(
-        title=used_title,
-        author=used_author,
-        fallback_stem=epub_path.stem,
+    direction_label = "RTL" if binding_direction == "rtl" else "LTR"
+    return input_pdf.with_name(
+        f"{input_pdf.stem} - Imposed {pages_per_signature}pp {direction_label}.pdf"
     )
-    output_dir = output_dir_for_book(epub_path.parent, book_slug)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir / interior_pdf_name(book_slug)
 
 
-def ensure_weasyprint_available() -> None:
-    if HTML is None:
-        raise RuntimeError(
-            "WeasyPrint could not be imported because its native libraries are missing.\n"
-            "Install WeasyPrint's system dependencies and try again.\n\n"
-            f"Original import error: {WEASYPRINT_IMPORT_ERROR}"
-        )
-
-
-def render_pdf(html_doc: str, output_pdf_path: Path) -> None:
-    ensure_weasyprint_available()
-    output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    HTML(string=html_doc).write_pdf(str(output_pdf_path))
-
-
-def process_epub_to_pdf(
+def impose_pdf(
     *,
-    epub_path: str | Path,
-    output_pdf_path: str | Path | None = None,
-    title: str | None = None,
-    author: str | None = None,
-    settings: LayoutSettings | None = None,
-) -> EpubToPdfResult:
-    epub_path = Path(epub_path)
-    if not epub_path.exists():
-        raise FileNotFoundError(f"EPUB not found: {epub_path}")
+    input_pdf: str | Path,
+    output_pdf: str | Path | None = None,
+    settings: SignatureSettings,
+) -> ImpositionResult:
+    input_pdf = Path(input_pdf)
+    if not input_pdf.exists():
+        raise FileNotFoundError(f"Input PDF not found: {input_pdf}")
 
-    settings = settings or LayoutSettings()
+    reader = PdfReader(str(input_pdf))
+    writer = PdfWriter()
 
-    epub_content = load_epub_content(epub_path)
-    if not epub_content.sections:
-        raise ValueError("No readable content sections found in EPUB.")
+    total_pages = len(reader.pages)
+    if total_pages == 0:
+        raise ValueError("Input PDF has no pages")
 
-    used_title = title or epub_content.detected_title
-    used_author = author or epub_content.detected_author
+    padded_total = next_multiple(total_pages, settings.pages_per_signature)
+    blank_pages_added = padded_total - total_pages
 
-    html_doc = build_html_document(
-        title=used_title,
-        author=used_author,
-        sections=epub_content.sections,
-        settings=settings,
-    )
+    if (
+        settings.max_end_padding is not None
+        and blank_pages_added > settings.max_end_padding
+    ):
+        raise ValueError(
+            f"Would need {blank_pages_added} blank end pages, which exceeds the "
+            f"maximum allowed padding of {settings.max_end_padding}"
+        )
 
-    book_slug = build_book_slug(
-        title=used_title,
-        author=used_author,
-        fallback_stem=epub_path.stem,
-    )
+    template_page = reader.pages[0]
+    per_signature_sheets = signature_sheet_pairs(settings.pages_per_signature)
 
-    output_pdf = (
-        Path(output_pdf_path)
-        if output_pdf_path
-        else default_output_pdf_path(
-            epub_path,
-            used_title=used_title,
-            used_author=used_author,
+    for sig_start in range(1, padded_total + 1, settings.pages_per_signature):
+        for (front_left_local, front_right_local), (back_left_local, back_right_local) in per_signature_sheets:
+            front_left_abs = sig_start + front_left_local - 1
+            front_right_abs = sig_start + front_right_local - 1
+            back_left_abs = sig_start + back_left_local - 1
+            back_right_abs = sig_start + back_right_local - 1
+
+            front_left_page = get_page_or_blank(
+                reader,
+                front_left_abs,
+                padded_total,
+                total_pages,
+                template_page,
+            )
+            front_right_page = get_page_or_blank(
+                reader,
+                front_right_abs,
+                padded_total,
+                total_pages,
+                template_page,
+            )
+            back_left_page = get_page_or_blank(
+                reader,
+                back_left_abs,
+                padded_total,
+                total_pages,
+                template_page,
+            )
+            back_right_page = get_page_or_blank(
+                reader,
+                back_right_abs,
+                padded_total,
+                total_pages,
+                template_page,
+            )
+
+            writer.add_page(
+                create_sheet_side(
+                    front_left_page,
+                    front_right_page,
+                    binding_direction=settings.binding_direction,
+                )
+            )
+            writer.add_page(
+                create_sheet_side(
+                    back_left_page,
+                    back_right_page,
+                    binding_direction=settings.binding_direction,
+                )
+            )
+
+    output_pdf_path = (
+        Path(output_pdf)
+        if output_pdf is not None
+        else default_imposed_output_path(
+            input_pdf,
+            pages_per_signature=settings.pages_per_signature,
+            binding_direction=settings.binding_direction,
         )
     )
+    output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
-    render_pdf(html_doc, output_pdf)
+    with open(output_pdf_path, "wb") as handle:
+        writer.write(handle)
 
-    return EpubToPdfResult(
-        input_epub=epub_path,
-        output_dir=output_pdf.parent,
-        output_pdf=output_pdf,
-        book_slug=book_slug,
-        detected_title=epub_content.detected_title,
-        detected_author=epub_content.detected_author,
-        used_title=used_title,
-        used_author=used_author,
+    output_sheet_sides = len(writer.pages)
+    physical_sheets_total = output_sheet_sides // 2
+    total_signatures = padded_total // settings.pages_per_signature
+
+    return ImpositionResult(
+        input_pdf=input_pdf,
+        output_pdf=output_pdf_path,
+        input_pages=total_pages,
+        blank_pages_added=blank_pages_added,
+        output_sheet_sides=output_sheet_sides,
+        physical_sheets_total=physical_sheets_total,
+        total_signatures=total_signatures,
+        settings=settings,
     )
