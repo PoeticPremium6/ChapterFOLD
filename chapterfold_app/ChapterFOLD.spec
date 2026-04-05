@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-project_dir = Path(__file__).resolve().parent
+project_dir = Path.cwd().resolve()
 repo_root = project_dir.parent
 
 a = Analysis(
