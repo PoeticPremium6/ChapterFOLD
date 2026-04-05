@@ -4,11 +4,17 @@ from pathlib import Path
 
 project_dir = Path.cwd().resolve()
 repo_root = project_dir.parent
+gtk_bin_dir = Path(r"C:\msys64\ucrt64\bin")
+
+binaries = []
+if gtk_bin_dir.exists():
+    for dll in gtk_bin_dir.glob("*.dll"):
+        binaries.append((str(dll), "gtk_runtime"))
 
 a = Analysis(
     ['app.py'],
     pathex=[str(project_dir), str(repo_root)],
-    binaries=[],
+    binaries=binaries,
     datas=[],
     hiddenimports=[
         'core',
