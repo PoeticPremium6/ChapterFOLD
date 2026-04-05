@@ -129,6 +129,21 @@ def describe_binding_direction(binding_direction: str) -> str:
     return "Left-to-right"
 
 
+def describe_imposition_mode(mode: str) -> str:
+    normalized = (mode or "none").strip().lower()
+    mapping = {
+        "none": "Do not create imposed PDF",
+        "also": "Also create imposed PDF",
+    }
+    return mapping.get(normalized, mode)
+
+
+def describe_max_end_padding(max_end_padding: int | None) -> str:
+    if max_end_padding is None:
+        return "Unlimited"
+    return str(max_end_padding)
+
+
 def build_raw_preview_cleanup_settings() -> CleanupSettings:
     return CleanupSettings(
         join_soft_wrapped_lines=False,
@@ -316,9 +331,10 @@ def run_processing(
     export_docx: bool,
     paragraph_spacing_mode: str,
     margin_preset: str,
-    create_imposed_pdf: bool,
+    imposition_mode: str,
     imposed_pages_per_signature: int,
     binding_direction: str,
+    max_end_padding: int | None,
     log_callback: LogCallback | None = None,
 ) -> dict:
     if not input_epub.exists():
@@ -335,6 +351,8 @@ def run_processing(
         paragraph_spacing_mode=paragraph_spacing_mode,
         margin_preset=margin_preset,
     )
+
+    create_imposed_pdf = (imposition_mode or "none").strip().lower() == "also"
 
     log("Reading EPUB metadata...")
     epub_content = load_epub_content(input_epub)
@@ -356,6 +374,13 @@ def run_processing(
     log(f"Selected variant: {describe_variant(variant)}")
     log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
     log(f"Margin preset: {describe_margin_preset(margin_preset)}")
+    log(f"Imposition mode: {describe_imposition_mode(imposition_mode)}")
+
+    if create_imposed_pdf:
+        log(f"Pages per signature: {imposed_pages_per_signature}")
+        log(f"Binding direction: {describe_binding_direction(binding_direction)}")
+        log(f"Max blank end pages: {describe_max_end_padding(max_end_padding)}")
+
     log("Building text cleanup preview samples...")
 
     preview_samples = build_preview_samples(
@@ -410,12 +435,14 @@ def run_processing(
     imposed_total_signatures = None
     imposed_output_sheet_sides = None
     imposed_physical_sheets_total = None
+    imposed_signature_settings_pages = None
 
     if create_imposed_pdf:
         log("Creating imposed signature PDF...")
         signature_settings = build_signature_settings(
             pages_per_signature=imposed_pages_per_signature,
             binding_direction=binding_direction,
+            max_end_padding=max_end_padding,
         )
         imposed_output_path = build_imposed_output_path(
             output_dir=output_dir,
@@ -433,6 +460,7 @@ def run_processing(
         imposed_total_signatures = imposed_result.total_signatures
         imposed_output_sheet_sides = imposed_result.output_sheet_sides
         imposed_physical_sheets_total = imposed_result.physical_sheets_total
+        imposed_signature_settings_pages = signature_settings.pages_per_signature
 
         log(f"Imposed PDF created: {imposed_output_pdf}")
         log(
@@ -465,11 +493,15 @@ def run_processing(
         "paragraph_spacing_mode_label": describe_spacing_mode(paragraph_spacing_mode),
         "margin_preset": margin_preset,
         "margin_preset_label": describe_margin_preset(margin_preset),
+        "imposition_mode": imposition_mode,
+        "imposition_mode_label": describe_imposition_mode(imposition_mode),
         "create_imposed_pdf": create_imposed_pdf,
         "imposed_output_pdf": imposed_output_pdf,
-        "imposed_pages_per_signature": imposed_pages_per_signature if create_imposed_pdf else None,
+        "imposed_pages_per_signature": imposed_signature_settings_pages,
         "binding_direction": binding_direction if create_imposed_pdf else "",
         "binding_direction_label": describe_binding_direction(binding_direction) if create_imposed_pdf else "",
+        "max_end_padding": max_end_padding,
+        "max_end_padding_label": describe_max_end_padding(max_end_padding),
         "imposed_blank_pages_added": imposed_blank_pages_added,
         "imposed_total_signatures": imposed_total_signatures,
         "imposed_output_sheet_sides": imposed_output_sheet_sides,
