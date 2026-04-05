@@ -1,4 +1,3 @@
-````md
 # ChapterFOLD
 
 <p align="center">
@@ -197,5 +196,3 @@ ChapterFOLD is currently an active early-stage project.
 The desktop app is usable, but still evolving. Expect changes to cleanup heuristics, UI wording, output options, and packaging as more books and edge cases are tested.
 
 ## License
-
-remium6/ChapterFOLD "GitHub - PoeticPremium6/ChapterFOLD: Python UI to process open-access EPUB files into formats suitable for bookbinders · GitHub"
