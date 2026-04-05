@@ -8,10 +8,6 @@
   Convert EPUBs into cleaner, print-ready PDF and DOCX interiors for bookbinding and personal printing.
 </p>
 
-<p align="center">
-  <img src="docs/ChatperFOLD_Example.PNG" alt="ChapterFOLD desktop app screenshot" width="1000" />
-</p>
-
 ## Windows download
 
 For normal use, you do **not** need Python.
@@ -79,9 +75,6 @@ The desktop app lets you:
 - **Wide**
 - **Large print friendly**
 
-## Example desktop app view
-
-![ChapterFOLD desktop app](docs/ChatperFOLD_Example.PNG)
 
 ## Running from source
 
@@ -102,9 +95,6 @@ From the repo root:
   Convert EPUBs into cleaner, print-ready PDF and DOCX interiors for bookbinding and personal printing.
 </p>
 
-<p align="center">
-  <img src="docs/ChatperFOLD_Example.PNG" alt="ChapterFOLD desktop app screenshot" width="1000" />
-</p>
 
 ## Windows download
 
@@ -173,9 +163,6 @@ The desktop app lets you:
 - **Wide**
 - **Large print friendly**
 
-## Example desktop app view
-
-![ChapterFOLD desktop app](docs/ChatperFOLD_Example.PNG)
 
 ## Running from source
 
