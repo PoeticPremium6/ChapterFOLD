@@ -63,6 +63,7 @@ class EpubToPdfResult:
     output_dir: Path
     output_pdf: Path
     output_docx: Path | None
+    output_markdown: Path | None
     book_slug: str
     detected_title: str
     detected_author: str
@@ -86,8 +87,9 @@ DIALOGUE_TAG_START_RE = re.compile(
 )
 
 LOWER_CONTINUATION_RE = re.compile(r"^[a-z(\[\u2014\-']")
-TERMINAL_END_RE = re.compile(r'[.!?]["\u201d\u2019\']?$')
-OPENING_QUOTE_RE = re.compile(r'^[\"\u201c\u2018]')
+TERMINAL_END_RE = re.compile(r"""[.!?]["\u201d\u2019']?$""")
+OPENING_QUOTE_RE = re.compile(r"""^["\u201c\u2018]""")
+
 
 def cm(value: float) -> str:
     return f"{value:.3f}cm"
@@ -131,6 +133,10 @@ def editable_docx_name(book_slug: str) -> str:
     return f"{book_slug}__editable.docx"
 
 
+def markdown_name(book_slug: str) -> str:
+    return f"{book_slug}__google-docs.md"
+
+
 def normalize_line_endings(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -152,10 +158,10 @@ def join_dialogue_line_pair(current: str, nxt: str) -> str | None:
     if not current or not nxt:
         return None
 
-    if re.search(r'[,\u2014\-]$|["\u201d\u2019]$', current) and LOWER_CONTINUATION_RE.match(nxt):
+    if re.search(r"""[,\u2014\-]|["\u201d\u2019]$""", current) and LOWER_CONTINUATION_RE.match(nxt):
         return f"{current} {nxt}"
 
-    if re.search(r'["\u201d\u2019]$', current) and DIALOGUE_TAG_START_RE.match(nxt):
+    if re.search(r"""["\u201d\u2019]$""", current) and DIALOGUE_TAG_START_RE.match(nxt):
         return f"{current} {nxt}"
 
     return None
@@ -316,7 +322,6 @@ def _raw_paragraph_items_from_fragment(fragment: str, *, drop_notes: bool = Fals
             continue
 
         if node.find(block_tags):
-            # Only keep leaf-ish block nodes to avoid duplicating nested text.
             continue
 
         text = node.get_text("\n", strip=False)
@@ -351,12 +356,10 @@ def should_merge_dialogue_paragraphs(
     if is_scene_break(current) or is_scene_break(nxt):
         return False
 
-    # Strong signal: quoted speech followed by a dialogue tag split into a new paragraph.
-    if re.search(r'["\u201d\u2019]$', current) and DIALOGUE_TAG_START_RE.match(nxt):
+    if re.search(r"""["\u201d\u2019]$""", current) and DIALOGUE_TAG_START_RE.match(nxt):
         return True
 
-    # Continuation after comma, dash, colon, semicolon, or open-ended quote.
-    if re.search(r'[,;:\u2014\-]$|["\u201d\u2019]$', current) and (
+    if re.search(r"""[,;:\u2014\-]$|["\u201d\u2019]$""", current) and (
         LOWER_CONTINUATION_RE.match(nxt) or DIALOGUE_TAG_START_RE.match(nxt)
     ):
         return True
@@ -364,17 +367,14 @@ def should_merge_dialogue_paragraphs(
     if not settings.aggressive_mode:
         return False
 
-    # Aggressive mode: short orphaned continuation paragraph.
     if len(current) <= 110 and not TERMINAL_END_RE.search(current):
         if LOWER_CONTINUATION_RE.match(nxt) or DIALOGUE_TAG_START_RE.match(nxt):
             return True
 
-    # Aggressive mode: short quote fragment flowing into next paragraph.
     if len(current) <= 90 and OPENING_QUOTE_RE.match(current):
         if not TERMINAL_END_RE.search(current):
             return True
 
-    # Aggressive mode: very short lowercase/dialogue-tag continuation.
     if len(nxt) <= 120 and (
         LOWER_CONTINUATION_RE.match(nxt) or DIALOGUE_TAG_START_RE.match(nxt)
     ):
@@ -487,6 +487,7 @@ def build_clean_text_sections(
             cleaned_sections.append((heading, cleaned_text))
     return cleaned_sections
 
+
 def strip_duplicate_opening_heading_paragraph(cleaned_html: str, heading: str) -> str:
     heading = heading.strip()
     if not heading:
@@ -502,11 +503,14 @@ def strip_duplicate_opening_heading_paragraph(cleaned_html: str, heading: str) -
 
     first_para = html.unescape(match.group(1)).strip()
 
-    normalize = lambda s: re.sub(r"\s+", " ", s).strip().casefold()
+    def normalize(value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip().casefold()
+
     if normalize(first_para) == normalize(heading):
         return "\n".join(lines[1:]).strip()
 
     return cleaned_html
+
 
 def build_section_blocks(
     sections: List[Tuple[str, str]],
@@ -713,13 +717,13 @@ def build_html_document(
 ) -> str:
     blocks = [
         f"""
-<section class=\"title-page\">
-  <div class=\"title-wrap\">
+<section class="title-page">
+  <div class="title-wrap">
     <h1>{html.escape(title)}</h1>
-    <p class=\"author\">{html.escape(author)}</p>
+    <p class="author">{html.escape(author)}</p>
   </div>
 </section>
-<div class=\"blank-page\"></div>
+<div class="blank-page"></div>
 """,
         *build_section_blocks(
             sections,
@@ -731,9 +735,9 @@ def build_html_document(
 
     return f"""
 <!doctype html>
-<html lang=\"en\">
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\" />
+  <meta charset="utf-8" />
   <title>{html.escape(title)}</title>
   <style>{css}</style>
 </head>
@@ -762,6 +766,10 @@ def default_output_pdf_path(
 
 def default_output_docx_path(output_dir: Path, book_slug: str) -> Path:
     return output_dir / editable_docx_name(book_slug)
+
+
+def default_output_markdown_path(output_dir: Path, book_slug: str) -> Path:
+    return output_dir / markdown_name(book_slug)
 
 
 def ensure_weasyprint_available() -> None:
@@ -814,12 +822,53 @@ def export_clean_docx(
     return output_path
 
 
+def _escape_markdown_text(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("*", "\\*").replace("_", "\\_")
+
+
+def export_clean_markdown(
+    *,
+    title: str,
+    author: str,
+    sections: List[Tuple[str, str]],
+    output_path: str | Path,
+) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    parts: list[str] = [f"# {_escape_markdown_text(title)}"]
+
+    if author.strip():
+        parts.append("")
+        parts.append(f"_By {_escape_markdown_text(author)}_")
+
+    for heading, text in sections:
+        parts.append("")
+        if heading.strip():
+            parts.append(f"## {_escape_markdown_text(heading.strip())}")
+            parts.append("")
+
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        for para in paragraphs:
+            if is_scene_break(para) or para == "***":
+                parts.append("***")
+            else:
+                parts.append(_escape_markdown_text(para))
+            parts.append("")
+
+    markdown_text = "\n".join(parts).rstrip() + "\n"
+    output_path.write_text(markdown_text, encoding="utf-8")
+    return output_path
+
+
 def process_epub_to_pdf(
     *,
     epub_path: str | Path,
     output_pdf_path: str | Path | None = None,
     output_docx_path: str | Path | None = None,
+    output_markdown_path: str | Path | None = None,
     export_docx: bool = False,
+    export_markdown: bool = False,
     title: str | None = None,
     author: str | None = None,
     settings: LayoutSettings | None = None,
@@ -864,13 +913,16 @@ def process_epub_to_pdf(
 
     render_pdf(html_doc, output_pdf)
 
-    output_docx: Path | None = None
-    if export_docx:
+    clean_text_sections: List[Tuple[str, str]] | None = None
+    if export_docx or export_markdown:
         clean_text_sections = build_clean_text_sections(
             epub_content.sections,
             drop_notes=settings.drop_notes,
             cleanup_settings=cleanup_settings,
         )
+
+    output_docx: Path | None = None
+    if export_docx:
         output_docx = (
             Path(output_docx_path)
             if output_docx_path
@@ -879,8 +931,22 @@ def process_epub_to_pdf(
         export_clean_docx(
             title=used_title,
             author=used_author,
-            sections=clean_text_sections,
+            sections=clean_text_sections or [],
             output_path=output_docx,
+        )
+
+    output_markdown: Path | None = None
+    if export_markdown:
+        output_markdown = (
+            Path(output_markdown_path)
+            if output_markdown_path
+            else default_output_markdown_path(output_pdf.parent, book_slug)
+        )
+        export_clean_markdown(
+            title=used_title,
+            author=used_author,
+            sections=clean_text_sections or [],
+            output_path=output_markdown,
         )
 
     return EpubToPdfResult(
@@ -888,6 +954,7 @@ def process_epub_to_pdf(
         output_dir=output_pdf.parent,
         output_pdf=output_pdf,
         output_docx=output_docx,
+        output_markdown=output_markdown,
         book_slug=book_slug,
         detected_title=epub_content.detected_title,
         detected_author=epub_content.detected_author,
