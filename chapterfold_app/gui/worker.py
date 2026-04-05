@@ -25,9 +25,10 @@ class Worker(QObject):
         export_docx: bool,
         paragraph_spacing_mode: str,
         margin_preset: str,
-        create_imposed_pdf: bool,
+        imposition_mode: str,
         imposed_pages_per_signature: int,
         binding_direction: str,
+        max_end_padding: int | None,
     ) -> None:
         super().__init__()
         self.input_epub = input_epub
@@ -36,9 +37,10 @@ class Worker(QObject):
         self.export_docx = export_docx
         self.paragraph_spacing_mode = paragraph_spacing_mode
         self.margin_preset = margin_preset
-        self.create_imposed_pdf = create_imposed_pdf
+        self.imposition_mode = imposition_mode
         self.imposed_pages_per_signature = imposed_pages_per_signature
         self.binding_direction = binding_direction
+        self.max_end_padding = max_end_padding
 
     @Slot()
     def run(self) -> None:
@@ -50,9 +52,10 @@ class Worker(QObject):
                 export_docx=self.export_docx,
                 paragraph_spacing_mode=self.paragraph_spacing_mode,
                 margin_preset=self.margin_preset,
-                create_imposed_pdf=self.create_imposed_pdf,
+                imposition_mode=self.imposition_mode,
                 imposed_pages_per_signature=self.imposed_pages_per_signature,
                 binding_direction=self.binding_direction,
+                max_end_padding=self.max_end_padding,
                 log_callback=self.log.emit,
             )
             self.success.emit(payload)
