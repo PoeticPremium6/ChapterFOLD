@@ -1,21 +1,13 @@
+Absolutely — here is a complete updated `README.md` with a clearer **Windows user instructions** section, and with the screenshot shown only once.
+
+````md
 # ChapterFOLD
 
 <p align="center">
   <img src="docs/icon.png" alt="ChapterFOLD logo" width="120" />
 </p>
 
-<p align="center">
-  Convert EPUBs into cleaner, print-ready PDF and DOCX interiors for bookbinding and personal printing.
-</p>
-
-## Windows download
-
-For normal use, you do **not** need Python.
-
-1. Download the latest Windows release ZIP from the Releases page
-2. Extract the ZIP fully
-3. Open the extracted folder
-4. Run `ChapterFOLD.exe`
+Convert EPUBs into cleaner, print-ready PDF and DOCX interiors for bookbinding and personal printing.
 
 ## What ChapterFOLD does
 
@@ -40,6 +32,35 @@ ChapterFOLD is especially useful for:
 - readers making personal physical copies
 - fanfiction readers exporting EPUBs into printable interiors
 - people who want more control over spacing, margins, and layout
+
+## Windows user instructions
+
+You do **not** need Python to use the release version.
+
+### How to download and run the app
+
+1. Go to the **Releases** section of this repository
+2. Download the latest Windows release ZIP
+3. Extract the ZIP fully to a normal folder on your PC
+4. Open the extracted folder
+5. Run `ChapterFOLD.exe`
+
+### Important notes
+
+- Do **not** run the app from inside the ZIP file
+- Extract the whole ZIP first
+- Keep all files in the extracted folder together
+- If Windows shows a warning, click **More info** and then **Run anyway** if you trust the release source
+- If the app does not start, try moving the extracted folder somewhere simple like your Desktop first
+
+### Typical Windows flow
+
+1. Download release ZIP
+2. Right-click the ZIP and choose **Extract All**
+3. Open the extracted `ChapterFOLD` folder
+4. Double-click `ChapterFOLD.exe`
+5. Choose your EPUB and output folder
+6. Click **Process EPUB**
 
 ## Main desktop app features
 
@@ -156,7 +177,7 @@ ChapterFOLD/
 └─ README.md
 ```
 
-## Notes for Windows users
+## Notes for Windows users running from source
 
 If you are running from source rather than using the packaged release, WeasyPrint may require native Windows libraries to be available.
 
@@ -196,3 +217,10 @@ ChapterFOLD is currently an active early-stage project.
 The desktop app is usable, but still evolving. Expect changes to cleanup heuristics, UI wording, output options, and packaging as more books and edge cases are tested.
 
 ## License
+
+Add your preferred license here.
+
+```
+
+One small improvement I’d recommend later is renaming `docs/ChatperFOLD_Example.PNG` to something cleaner like `docs/chapterfold_example.png`.
+```
