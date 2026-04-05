@@ -1,6 +1,3 @@
-Absolutely — here is a complete updated `README.md` with a clearer **Windows user instructions** section, and with the screenshot shown only once.
-
-````md
 # ChapterFOLD
 
 <p align="center">
@@ -218,9 +215,3 @@ The desktop app is usable, but still evolving. Expect changes to cleanup heurist
 
 ## License
 
-Add your preferred license here.
-
-```
-
-One small improvement I’d recommend later is renaming `docs/ChatperFOLD_Example.PNG` to something cleaner like `docs/chapterfold_example.png`.
-```
