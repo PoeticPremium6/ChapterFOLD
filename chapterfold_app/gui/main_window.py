@@ -139,6 +139,13 @@ QPushButton#primaryButton:pressed {
     background: #611f98;
 }
 
+QPushButton#toggleOn {
+    background: #ead7fb;
+    border: 1px solid #b98ae8;
+    color: #4b1f6f;
+    font-weight: 700;
+}
+
 QTextEdit#resultsBox {
     background: #fcfafe;
 }
@@ -182,9 +189,13 @@ class MainWindow(QMainWindow):
         self.variant_combo.addItem("Dialogue Merge", "paragraph-dialogue-merge")
         self.variant_combo.addItem("Aggressive Cleanup", "aggressive-cleanup")
 
-        self.export_docx_checkbox = QPushButton("Also export DOCX")
-        self.export_docx_checkbox.setCheckable(True)
-        self.export_docx_checkbox.setChecked(True)
+        self.export_docx_btn = QPushButton("DOCX for Word / LibreOffice")
+        self.export_docx_btn.setCheckable(True)
+        self.export_docx_btn.setChecked(True)
+
+        self.export_markdown_btn = QPushButton("Markdown for Google Docs")
+        self.export_markdown_btn.setCheckable(True)
+        self.export_markdown_btn.setChecked(True)
 
         self.spacing_mode_combo = QComboBox()
         self.spacing_mode_combo.addItem("Traditional (paragraph spacing + indents)", "traditional")
@@ -263,6 +274,9 @@ class MainWindow(QMainWindow):
         self.open_docx_btn = QPushButton("Open DOCX")
         self.open_docx_btn.setEnabled(False)
 
+        self.open_markdown_btn = QPushButton("Open Markdown")
+        self.open_markdown_btn.setEnabled(False)
+
         self.open_imposed_btn = QPushButton("Open Imposed PDF")
         self.open_imposed_btn.setEnabled(False)
 
@@ -274,12 +288,14 @@ class MainWindow(QMainWindow):
         self.last_output_dir: str | None = None
         self.last_output_pdf: str | None = None
         self.last_output_docx: str | None = None
+        self.last_output_markdown: str | None = None
         self.last_imposed_pdf: str | None = None
         self.preview_samples: list[dict[str, str]] = []
         self.current_preview_index = 0
 
         self._build_ui()
         self._connect_signals()
+        self._refresh_output_toggle_styles()
 
         default_output = Path.cwd()
         self.output_edit.setText(str(default_output))
@@ -289,6 +305,14 @@ class MainWindow(QMainWindow):
         label.setObjectName("sectionHintLabel")
         label.setWordWrap(True)
         return label
+
+    def _refresh_output_toggle_styles(self) -> None:
+        self.export_docx_btn.setObjectName("toggleOn" if self.export_docx_btn.isChecked() else "")
+        self.export_markdown_btn.setObjectName("toggleOn" if self.export_markdown_btn.isChecked() else "")
+        self.style().unpolish(self.export_docx_btn)
+        self.style().polish(self.export_docx_btn)
+        self.style().unpolish(self.export_markdown_btn)
+        self.style().polish(self.export_markdown_btn)
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -319,6 +343,7 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.open_output_btn)
         action_row.addWidget(self.open_pdf_btn)
         action_row.addWidget(self.open_docx_btn)
+        action_row.addWidget(self.open_markdown_btn)
         action_row.addWidget(self.open_imposed_btn)
         action_row.addStretch()
         action_row.addWidget(self.process_btn)
@@ -331,7 +356,7 @@ class MainWindow(QMainWindow):
         lower_splitter.setStretchFactor(0, 2)
         lower_splitter.setStretchFactor(1, 4)
         lower_splitter.setStretchFactor(2, 3)
-        lower_splitter.setSizes([220, 360, 240])
+        lower_splitter.setSizes([240, 360, 240])
         root.addWidget(lower_splitter, 1)
 
     def _build_book_group(self) -> QGroupBox:
@@ -363,8 +388,8 @@ class MainWindow(QMainWindow):
         return group
 
     def _build_cleanup_group(self) -> QGroupBox:
-        group = QGroupBox("Cleanup, layout, and binding")
-        group.setMinimumWidth(420)
+        group = QGroupBox("Cleanup, layout, binding, and outputs")
+        group.setMinimumWidth(440)
         group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QGridLayout(group)
@@ -372,7 +397,7 @@ class MainWindow(QMainWindow):
         layout.setVerticalSpacing(12)
 
         layout.addWidget(
-            self._hint_label("Choose cleanup strength, typography, and optional signature imposition."),
+            self._hint_label("Choose cleanup strength, typography, optional signature imposition, and editable export formats."),
             0,
             0,
             1,
@@ -388,8 +413,13 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Margins"), 3, 0)
         layout.addWidget(self.margin_preset_combo, 3, 1)
 
-        layout.addWidget(QLabel("Options"), 4, 0)
-        layout.addWidget(self.export_docx_checkbox, 4, 1)
+        layout.addWidget(QLabel("Editable outputs"), 4, 0)
+        outputs_layout = QVBoxLayout()
+        outputs_layout.setContentsMargins(0, 0, 0, 0)
+        outputs_layout.setSpacing(8)
+        outputs_layout.addWidget(self.export_docx_btn)
+        outputs_layout.addWidget(self.export_markdown_btn)
+        layout.addLayout(outputs_layout, 4, 1)
 
         layout.addWidget(QLabel("Imposition output"), 5, 0)
         layout.addWidget(self.imposition_mode_combo, 5, 1)
@@ -465,9 +495,12 @@ class MainWindow(QMainWindow):
         self.open_output_btn.clicked.connect(self._open_output_folder)
         self.open_pdf_btn.clicked.connect(self._open_pdf)
         self.open_docx_btn.clicked.connect(self._open_docx)
+        self.open_markdown_btn.clicked.connect(self._open_markdown)
         self.open_imposed_btn.clicked.connect(self._open_imposed_pdf)
         self.prev_preview_btn.clicked.connect(self._show_previous_preview)
         self.next_preview_btn.clicked.connect(self._show_next_preview)
+        self.export_docx_btn.toggled.connect(self._refresh_output_toggle_styles)
+        self.export_markdown_btn.toggled.connect(self._refresh_output_toggle_styles)
 
     def _browse_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -498,7 +531,8 @@ class MainWindow(QMainWindow):
         self.browse_input_btn.setEnabled(not busy)
         self.browse_output_btn.setEnabled(not busy)
         self.variant_combo.setEnabled(not busy)
-        self.export_docx_checkbox.setEnabled(not busy)
+        self.export_docx_btn.setEnabled(not busy)
+        self.export_markdown_btn.setEnabled(not busy)
         self.spacing_mode_combo.setEnabled(not busy)
         self.margin_preset_combo.setEnabled(not busy)
         self.imposition_mode_combo.setEnabled(not busy)
@@ -519,17 +553,20 @@ class MainWindow(QMainWindow):
         self.last_output_dir = None
         self.last_output_pdf = None
         self.last_output_docx = None
+        self.last_output_markdown = None
         self.last_imposed_pdf = None
         self.open_output_btn.setEnabled(False)
         self.open_pdf_btn.setEnabled(False)
         self.open_docx_btn.setEnabled(False)
+        self.open_markdown_btn.setEnabled(False)
         self.open_imposed_btn.setEnabled(False)
 
     def _start_processing(self) -> None:
         input_path = self.input_edit.text().strip()
         output_dir = self.output_edit.text().strip()
         variant = self.variant_combo.currentData()
-        export_docx = self.export_docx_checkbox.isChecked()
+        export_docx = self.export_docx_btn.isChecked()
+        export_markdown = self.export_markdown_btn.isChecked()
         paragraph_spacing_mode = self.spacing_mode_combo.currentData()
         margin_preset = self.margin_preset_combo.currentData()
         imposition_mode = self.imposition_mode_combo.currentData()
@@ -565,6 +602,7 @@ class MainWindow(QMainWindow):
             output_dir=output_dir,
             variant=variant,
             export_docx=export_docx,
+            export_markdown=export_markdown,
             paragraph_spacing_mode=paragraph_spacing_mode,
             margin_preset=margin_preset,
             imposition_mode=imposition_mode,
@@ -611,11 +649,17 @@ class MainWindow(QMainWindow):
             "",
             f"Input EPUB: {payload.get('input_epub', '')}",
             f"Output PDF: {payload.get('output_pdf', '')}",
+            f"DOCX export: {'Yes (Word / LibreOffice)' if payload.get('export_docx') else 'No'}",
+            f"Markdown export: {'Yes (Google Docs)' if payload.get('export_markdown') else 'No'}",
         ]
 
         output_docx = payload.get("output_docx", "")
+        output_markdown = payload.get("output_markdown", "")
+
         if output_docx:
             lines.append(f"Output DOCX: {output_docx}")
+        if output_markdown:
+            lines.append(f"Output Markdown: {output_markdown}")
 
         lines.extend([
             "",
@@ -625,6 +669,8 @@ class MainWindow(QMainWindow):
 
         if payload.get("docx_size_mb") is not None:
             lines.append(f"Output DOCX size: {self._format_size(payload.get('docx_size_mb'))}")
+        if payload.get("markdown_size_mb") is not None:
+            lines.append(f"Output Markdown size: {self._format_size(payload.get('markdown_size_mb'))}")
 
         lines.append(f"Selected PDF pages: {payload.get('output_pdf_pages', 'N/A')}")
 
@@ -664,11 +710,13 @@ class MainWindow(QMainWindow):
         self.last_output_dir = payload.get("output_dir", "")
         self.last_output_pdf = payload.get("output_pdf", "")
         self.last_output_docx = payload.get("output_docx", "")
+        self.last_output_markdown = payload.get("output_markdown", "")
         self.last_imposed_pdf = payload.get("imposed_output_pdf", "")
 
         self.open_output_btn.setEnabled(bool(self.last_output_dir))
         self.open_pdf_btn.setEnabled(bool(self.last_output_pdf))
         self.open_docx_btn.setEnabled(bool(self.last_output_docx))
+        self.open_markdown_btn.setEnabled(bool(self.last_output_markdown))
         self.open_imposed_btn.setEnabled(bool(self.last_imposed_pdf))
 
         self.results_box.setPlainText(self._build_results_text(payload))
@@ -751,6 +799,17 @@ class MainWindow(QMainWindow):
         path = Path(self.last_output_docx)
         if not path.exists():
             QMessageBox.warning(self, "Missing file", "The DOCX file no longer exists.")
+            return
+
+        os.startfile(str(path))
+
+    def _open_markdown(self) -> None:
+        if not self.last_output_markdown:
+            return
+
+        path = Path(self.last_output_markdown)
+        if not path.exists():
+            QMessageBox.warning(self, "Missing file", "The Markdown file no longer exists.")
             return
 
         os.startfile(str(path))
