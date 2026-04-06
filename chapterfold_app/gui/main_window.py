@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QTextEdit,
@@ -168,6 +169,11 @@ QCheckBox::indicator:checked {
     background: #ead7fb;
 }
 
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+
 QTextEdit#resultsBox {
     background: #fcfafe;
 }
@@ -180,14 +186,19 @@ QTextEdit#logBox {
 
 QSplitter::handle {
     background: #e8ddf4;
+    border-radius: 4px;
+}
+
+QSplitter::handle:hover {
+    background: #d7c5ee;
 }
 
 QSplitter::handle:horizontal {
-    width: 8px;
+    width: 12px;
 }
 
 QSplitter::handle:vertical {
-    height: 8px;
+    height: 10px;
 }
 """
 
@@ -196,8 +207,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("ChapterFOLD")
-        self.resize(1260, 980)
-        self.setMinimumSize(1080, 780)
+        self.resize(1320, 980)
+        self.setMinimumSize(1100, 780)
         self.setStyleSheet(APP_STYLESHEET)
 
         self.thread: QThread | None = None
@@ -406,6 +417,13 @@ class MainWindow(QMainWindow):
         if hasattr(self, "custom_margin_widget"):
             self.custom_margin_widget.setVisible(custom_margins)
 
+    def _wrap_in_scroll_area(self, widget: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setWidget(widget)
+        return scroll
+
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
@@ -422,13 +440,15 @@ class MainWindow(QMainWindow):
 
         root.addWidget(self.status_label)
 
-        top_splitter = QSplitter(Qt.Orientation.Horizontal)
-        top_splitter.addWidget(self._build_book_group())
-        top_splitter.addWidget(self._build_cleanup_group())
-        top_splitter.setStretchFactor(0, 3)
-        top_splitter.setStretchFactor(1, 3)
-        top_splitter.setSizes([640, 560])
-        root.addWidget(top_splitter, 0)
+        self.top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.top_splitter.setChildrenCollapsible(False)
+        self.top_splitter.setHandleWidth(12)
+        self.top_splitter.addWidget(self._build_book_group())
+        self.top_splitter.addWidget(self._wrap_in_scroll_area(self._build_cleanup_group()))
+        self.top_splitter.setStretchFactor(0, 2)
+        self.top_splitter.setStretchFactor(1, 3)
+        self.top_splitter.setSizes([480, 760])
+        root.addWidget(self.top_splitter, 0)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
@@ -442,6 +462,8 @@ class MainWindow(QMainWindow):
         root.addLayout(action_row)
 
         lower_splitter = QSplitter(Qt.Orientation.Vertical)
+        lower_splitter.setChildrenCollapsible(False)
+        lower_splitter.setHandleWidth(10)
         lower_splitter.addWidget(self._build_results_group())
         lower_splitter.addWidget(self._build_preview_group())
         lower_splitter.addWidget(self._build_log_group())
@@ -453,7 +475,7 @@ class MainWindow(QMainWindow):
 
     def _build_book_group(self) -> QGroupBox:
         group = QGroupBox("Book")
-        group.setMinimumWidth(460)
+        group.setMinimumWidth(360)
         group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QGridLayout(group)
@@ -481,15 +503,20 @@ class MainWindow(QMainWindow):
 
     def _build_cleanup_group(self) -> QGroupBox:
         group = QGroupBox("Cleanup, layout, binding, and outputs")
-        group.setMinimumWidth(500)
+        group.setMinimumWidth(560)
         group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QGridLayout(group)
-        layout.setHorizontalSpacing(12)
+        layout.setHorizontalSpacing(14)
         layout.setVerticalSpacing(12)
+        layout.setColumnMinimumWidth(0, 150)
+        layout.setColumnStretch(1, 1)
 
         layout.addWidget(
-            self._hint_label("Choose cleanup strength, typography, optional signature imposition, and editable export formats."),
+            self._hint_label(
+                "Choose cleanup strength, typography, optional signature imposition, and editable export formats. "
+                "Drag the divider between Book and this panel to make this area wider."
+            ),
             0,
             0,
             1,
@@ -529,24 +556,28 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.custom_margin_widget, 6, 1)
 
         layout.addWidget(QLabel("Editable outputs"), 7, 0)
-        layout.addWidget(self.export_docx_btn, 7, 1)
 
-        layout.addWidget(QLabel(""), 8, 0)
-        layout.addWidget(self.export_markdown_btn, 8, 1)
+        outputs_container = QWidget()
+        outputs_layout = QVBoxLayout(outputs_container)
+        outputs_layout.setContentsMargins(0, 0, 0, 0)
+        outputs_layout.setSpacing(8)
+        outputs_layout.addWidget(self.export_docx_btn)
+        outputs_layout.addWidget(self.export_markdown_btn)
 
-        layout.addWidget(QLabel("Imposition output"), 9, 0)
-        layout.addWidget(self.imposition_mode_combo, 9, 1)
+        layout.addWidget(outputs_container, 7, 1)
 
-        layout.addWidget(QLabel("Pages per signature"), 10, 0)
-        layout.addWidget(self.signature_pages_combo, 10, 1)
+        layout.addWidget(QLabel("Imposition output"), 8, 0)
+        layout.addWidget(self.imposition_mode_combo, 8, 1)
 
-        layout.addWidget(QLabel("Binding direction"), 11, 0)
-        layout.addWidget(self.binding_direction_combo, 11, 1)
+        layout.addWidget(QLabel("Pages per signature"), 9, 0)
+        layout.addWidget(self.signature_pages_combo, 9, 1)
 
-        layout.addWidget(QLabel("Max blank end pages"), 12, 0)
-        layout.addWidget(self.max_end_padding_combo, 12, 1)
+        layout.addWidget(QLabel("Binding direction"), 10, 0)
+        layout.addWidget(self.binding_direction_combo, 10, 1)
 
-        layout.setColumnStretch(1, 1)
+        layout.addWidget(QLabel("Max blank end pages"), 11, 0)
+        layout.addWidget(self.max_end_padding_combo, 11, 1)
+
         return group
 
     def _build_results_group(self) -> QGroupBox:
@@ -571,6 +602,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(top)
 
         preview_splitter = QSplitter(Qt.Orientation.Horizontal)
+        preview_splitter.setChildrenCollapsible(False)
+        preview_splitter.setHandleWidth(10)
 
         before_container = QWidget()
         before_layout = QVBoxLayout(before_container)
