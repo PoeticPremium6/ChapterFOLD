@@ -862,9 +862,12 @@ def export_clean_docx(
     title: str,
     author: str,
     sections: List[Tuple[str, str]],
-    output_path: str | Path,
+    output_path: str | Path | None,
     settings: LayoutSettings,
-) -> Path:
+) -> Path | None:
+    if output_path is None:
+        return None
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1019,7 +1022,7 @@ def process_epub_to_pdf(
 
     output_pdf = (
         Path(output_pdf_path)
-        if output_pdf_path
+        if output_pdf_path is not None
         else default_output_pdf_path(
             epub_path,
             used_title=used_title,
@@ -1040,23 +1043,23 @@ def process_epub_to_pdf(
     output_docx: Path | None = None
     if export_docx:
         output_docx = (
-        Path(output_docx_path)
-        if output_docx_path
-        else default_output_docx_path(output_pdf.parent, book_slug)
-    )
-    export_clean_docx(
-        title=used_title,
-        author=used_author,
-        sections=clean_text_sections or [],
-        output_path=output_docx,
-        settings=settings,
-    )
+            Path(output_docx_path)
+            if output_docx_path is not None
+            else default_output_docx_path(output_pdf.parent, book_slug)
+        )
+        export_clean_docx(
+            title=used_title,
+            author=used_author,
+            sections=clean_text_sections or [],
+            output_path=output_docx,
+            settings=settings,
+        )
 
     output_markdown: Path | None = None
     if export_markdown:
         output_markdown = (
             Path(output_markdown_path)
-            if output_markdown_path
+            if output_markdown_path is not None
             else default_output_markdown_path(output_pdf.parent, book_slug)
         )
         export_clean_markdown(
