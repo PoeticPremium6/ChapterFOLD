@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -79,7 +80,8 @@ QLabel#sectionHintLabel {
 
 QLineEdit,
 QComboBox,
-QTextEdit {
+QTextEdit,
+QDoubleSpinBox {
     background: #ffffff;
     border: 1px solid #d8cbe8;
     border-radius: 10px;
@@ -89,11 +91,13 @@ QTextEdit {
 
 QLineEdit:focus,
 QComboBox:focus,
-QTextEdit:focus {
+QTextEdit:focus,
+QDoubleSpinBox:focus {
     border: 1px solid #8b4fd8;
 }
 
-QComboBox {
+QComboBox,
+QDoubleSpinBox {
     min-height: 24px;
 }
 
@@ -203,11 +207,65 @@ class MainWindow(QMainWindow):
         self.spacing_mode_combo.addItem("Indented compact (minimal paragraph gap + indents)", "indented-compact")
         self.spacing_mode_combo.addItem("Uniform (no paragraph gap, no indents)", "uniform")
 
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItem("Default trade (6 x 9 in)", "default-trade")
+        self.page_size_combo.addItem("A4", "a4")
+        self.page_size_combo.addItem("A5", "a5")
+        self.page_size_combo.addItem("A6", "a6")
+        self.page_size_combo.addItem("US Letter", "letter")
+        self.page_size_combo.addItem("Half Letter", "half-letter")
+        self.page_size_combo.addItem("Trade 5 x 8 in", "trade-5x8")
+        self.page_size_combo.addItem("Trade 6 x 9 in", "trade-6x9")
+        self.page_size_combo.addItem("Custom size", "custom")
+
         self.margin_preset_combo = QComboBox()
         self.margin_preset_combo.addItem("Standard", "standard")
         self.margin_preset_combo.addItem("Compact", "compact")
         self.margin_preset_combo.addItem("Wide", "wide")
         self.margin_preset_combo.addItem("Large print friendly", "large-print")
+        self.margin_preset_combo.addItem("Custom margins", "custom")
+
+        self.trim_width_spin = QDoubleSpinBox()
+        self.trim_width_spin.setDecimals(2)
+        self.trim_width_spin.setRange(5.0, 50.0)
+        self.trim_width_spin.setSingleStep(0.1)
+        self.trim_width_spin.setSuffix(" cm")
+        self.trim_width_spin.setValue(15.24)
+
+        self.trim_height_spin = QDoubleSpinBox()
+        self.trim_height_spin.setDecimals(2)
+        self.trim_height_spin.setRange(5.0, 50.0)
+        self.trim_height_spin.setSingleStep(0.1)
+        self.trim_height_spin.setSuffix(" cm")
+        self.trim_height_spin.setValue(22.86)
+
+        self.margin_top_spin = QDoubleSpinBox()
+        self.margin_top_spin.setDecimals(2)
+        self.margin_top_spin.setRange(0.3, 10.0)
+        self.margin_top_spin.setSingleStep(0.1)
+        self.margin_top_spin.setSuffix(" cm")
+        self.margin_top_spin.setValue(1.5)
+
+        self.margin_bottom_spin = QDoubleSpinBox()
+        self.margin_bottom_spin.setDecimals(2)
+        self.margin_bottom_spin.setRange(0.3, 10.0)
+        self.margin_bottom_spin.setSingleStep(0.1)
+        self.margin_bottom_spin.setSuffix(" cm")
+        self.margin_bottom_spin.setValue(1.5)
+
+        self.margin_inside_spin = QDoubleSpinBox()
+        self.margin_inside_spin.setDecimals(2)
+        self.margin_inside_spin.setRange(0.3, 10.0)
+        self.margin_inside_spin.setSingleStep(0.1)
+        self.margin_inside_spin.setSuffix(" cm")
+        self.margin_inside_spin.setValue(1.8)
+
+        self.margin_outside_spin = QDoubleSpinBox()
+        self.margin_outside_spin.setDecimals(2)
+        self.margin_outside_spin.setRange(0.3, 10.0)
+        self.margin_outside_spin.setSingleStep(0.1)
+        self.margin_outside_spin.setSuffix(" cm")
+        self.margin_outside_spin.setValue(1.0)
 
         self.imposition_mode_combo = QComboBox()
         self.imposition_mode_combo.addItem("Do not create imposed PDF", "none")
@@ -299,6 +357,7 @@ class MainWindow(QMainWindow):
 
         default_output = Path.cwd()
         self.output_edit.setText(str(default_output))
+        self._sync_layout_visibility()
 
     def _hint_label(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -313,6 +372,27 @@ class MainWindow(QMainWindow):
         self.style().polish(self.export_docx_btn)
         self.style().unpolish(self.export_markdown_btn)
         self.style().polish(self.export_markdown_btn)
+
+    def _build_two_spin_row(self, left_label: str, left_spin, right_label: str, right_spin) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(QLabel(left_label))
+        layout.addWidget(left_spin, 1)
+        layout.addSpacing(8)
+        layout.addWidget(QLabel(right_label))
+        layout.addWidget(right_spin, 1)
+        return container
+
+    def _sync_layout_visibility(self) -> None:
+        custom_size = self.page_size_combo.currentData() == "custom"
+        custom_margins = self.margin_preset_combo.currentData() == "custom"
+
+        if hasattr(self, "custom_trim_widget"):
+            self.custom_trim_widget.setVisible(custom_size)
+        if hasattr(self, "custom_margin_widget"):
+            self.custom_margin_widget.setVisible(custom_margins)
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -410,28 +490,51 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Paragraph spacing"), 2, 0)
         layout.addWidget(self.spacing_mode_combo, 2, 1)
 
-        layout.addWidget(QLabel("Margins"), 3, 0)
-        layout.addWidget(self.margin_preset_combo, 3, 1)
+        layout.addWidget(QLabel("Page size"), 3, 0)
+        layout.addWidget(self.page_size_combo, 3, 1)
 
-        layout.addWidget(QLabel("Editable outputs"), 4, 0)
+        self.custom_trim_widget = self._build_two_spin_row(
+            "Width",
+            self.trim_width_spin,
+            "Height",
+            self.trim_height_spin,
+        )
+        layout.addWidget(self.custom_trim_widget, 4, 1)
+
+        layout.addWidget(QLabel("Margins"), 5, 0)
+        layout.addWidget(self.margin_preset_combo, 5, 1)
+
+        self.custom_margin_widget = QWidget()
+        custom_margin_layout = QVBoxLayout(self.custom_margin_widget)
+        custom_margin_layout.setContentsMargins(0, 0, 0, 0)
+        custom_margin_layout.setSpacing(8)
+        custom_margin_layout.addWidget(
+            self._build_two_spin_row("Top", self.margin_top_spin, "Bottom", self.margin_bottom_spin)
+        )
+        custom_margin_layout.addWidget(
+            self._build_two_spin_row("Inside", self.margin_inside_spin, "Outside", self.margin_outside_spin)
+        )
+        layout.addWidget(self.custom_margin_widget, 6, 1)
+
+        layout.addWidget(QLabel("Editable outputs"), 7, 0)
         outputs_layout = QVBoxLayout()
         outputs_layout.setContentsMargins(0, 0, 0, 0)
         outputs_layout.setSpacing(8)
         outputs_layout.addWidget(self.export_docx_btn)
         outputs_layout.addWidget(self.export_markdown_btn)
-        layout.addLayout(outputs_layout, 4, 1)
+        layout.addLayout(outputs_layout, 7, 1)
 
-        layout.addWidget(QLabel("Imposition output"), 5, 0)
-        layout.addWidget(self.imposition_mode_combo, 5, 1)
+        layout.addWidget(QLabel("Imposition output"), 8, 0)
+        layout.addWidget(self.imposition_mode_combo, 8, 1)
 
-        layout.addWidget(QLabel("Pages per signature"), 6, 0)
-        layout.addWidget(self.signature_pages_combo, 6, 1)
+        layout.addWidget(QLabel("Pages per signature"), 9, 0)
+        layout.addWidget(self.signature_pages_combo, 9, 1)
 
-        layout.addWidget(QLabel("Binding direction"), 7, 0)
-        layout.addWidget(self.binding_direction_combo, 7, 1)
+        layout.addWidget(QLabel("Binding direction"), 10, 0)
+        layout.addWidget(self.binding_direction_combo, 10, 1)
 
-        layout.addWidget(QLabel("Max blank end pages"), 8, 0)
-        layout.addWidget(self.max_end_padding_combo, 8, 1)
+        layout.addWidget(QLabel("Max blank end pages"), 11, 0)
+        layout.addWidget(self.max_end_padding_combo, 11, 1)
 
         layout.setColumnStretch(1, 1)
         return group
@@ -501,6 +604,8 @@ class MainWindow(QMainWindow):
         self.next_preview_btn.clicked.connect(self._show_next_preview)
         self.export_docx_btn.toggled.connect(self._refresh_output_toggle_styles)
         self.export_markdown_btn.toggled.connect(self._refresh_output_toggle_styles)
+        self.page_size_combo.currentIndexChanged.connect(self._sync_layout_visibility)
+        self.margin_preset_combo.currentIndexChanged.connect(self._sync_layout_visibility)
 
     def _browse_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -534,7 +639,14 @@ class MainWindow(QMainWindow):
         self.export_docx_btn.setEnabled(not busy)
         self.export_markdown_btn.setEnabled(not busy)
         self.spacing_mode_combo.setEnabled(not busy)
+        self.page_size_combo.setEnabled(not busy)
         self.margin_preset_combo.setEnabled(not busy)
+        self.trim_width_spin.setEnabled(not busy)
+        self.trim_height_spin.setEnabled(not busy)
+        self.margin_top_spin.setEnabled(not busy)
+        self.margin_bottom_spin.setEnabled(not busy)
+        self.margin_inside_spin.setEnabled(not busy)
+        self.margin_outside_spin.setEnabled(not busy)
         self.imposition_mode_combo.setEnabled(not busy)
         self.signature_pages_combo.setEnabled(not busy)
         self.binding_direction_combo.setEnabled(not busy)
@@ -568,7 +680,17 @@ class MainWindow(QMainWindow):
         export_docx = self.export_docx_btn.isChecked()
         export_markdown = self.export_markdown_btn.isChecked()
         paragraph_spacing_mode = self.spacing_mode_combo.currentData()
+        page_size_preset = self.page_size_combo.currentData()
         margin_preset = self.margin_preset_combo.currentData()
+
+        custom_trim_width_cm = self.trim_width_spin.value() if page_size_preset == "custom" else None
+        custom_trim_height_cm = self.trim_height_spin.value() if page_size_preset == "custom" else None
+
+        custom_margin_top_cm = self.margin_top_spin.value() if margin_preset == "custom" else None
+        custom_margin_bottom_cm = self.margin_bottom_spin.value() if margin_preset == "custom" else None
+        custom_margin_inside_cm = self.margin_inside_spin.value() if margin_preset == "custom" else None
+        custom_margin_outside_cm = self.margin_outside_spin.value() if margin_preset == "custom" else None
+
         imposition_mode = self.imposition_mode_combo.currentData()
         imposed_pages_per_signature = int(self.signature_pages_combo.currentData())
         binding_direction = self.binding_direction_combo.currentData()
@@ -605,6 +727,13 @@ class MainWindow(QMainWindow):
             export_markdown=export_markdown,
             paragraph_spacing_mode=paragraph_spacing_mode,
             margin_preset=margin_preset,
+            page_size_preset=page_size_preset,
+            custom_trim_width_cm=custom_trim_width_cm,
+            custom_trim_height_cm=custom_trim_height_cm,
+            custom_margin_top_cm=custom_margin_top_cm,
+            custom_margin_bottom_cm=custom_margin_bottom_cm,
+            custom_margin_inside_cm=custom_margin_inside_cm,
+            custom_margin_outside_cm=custom_margin_outside_cm,
             imposition_mode=imposition_mode,
             imposed_pages_per_signature=imposed_pages_per_signature,
             binding_direction=binding_direction,
@@ -644,7 +773,16 @@ class MainWindow(QMainWindow):
             f"Author: {payload.get('author', '')}",
             f"Cleanup mode: {payload.get('variant_label', payload.get('variant', ''))}",
             f"Paragraph spacing mode: {payload.get('paragraph_spacing_mode_label', '')}",
+            f"Page size: {payload.get('page_size_preset_label', '')}",
+            f"Trim size: {payload.get('trim_width_cm', '')} x {payload.get('trim_height_cm', '')} cm",
             f"Margins: {payload.get('margin_preset_label', '')}",
+            (
+                "Margin values: "
+                f"top {payload.get('margin_top_cm', '')} / "
+                f"bottom {payload.get('margin_bottom_cm', '')} / "
+                f"inside {payload.get('margin_inside_cm', '')} / "
+                f"outside {payload.get('margin_outside_cm', '')} cm"
+            ),
             f"Imposition output: {payload.get('imposition_mode_label', '')}",
             "",
             f"Input EPUB: {payload.get('input_epub', '')}",
