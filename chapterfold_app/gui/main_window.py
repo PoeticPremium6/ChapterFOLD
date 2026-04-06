@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGridLayout,
     QGroupBox,
