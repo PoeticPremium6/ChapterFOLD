@@ -14,7 +14,7 @@ from core.epub_service import (
     load_epub_content,
     process_epub_to_pdf,
 )
-from core.impose_service import SignatureSettings, impose_pdf_for_binding
+from core.impose_service import build_signature_settings, impose_pdf
 
 LogCallback = Callable[[str], None]
 
@@ -472,17 +472,21 @@ def run_processing(
     if create_imposed_pdf:
         log("Creating imposed signature PDF...")
         imposed_signature_settings_pages = imposed_pages_per_signature
-        signature_settings = SignatureSettings(
+
+        signature_settings = build_signature_settings(
             pages_per_signature=imposed_pages_per_signature,
-            binding_direction=binding_direction,
             max_end_padding=max_end_padding,
+            binding_direction=binding_direction,
         )
+
         imposed_path = output_dir / f"{file_stem} - Imposed.pdf"
-        impose_result = impose_pdf_for_binding(
-            input_pdf_path=result.output_pdf,
-            output_pdf_path=imposed_path,
+
+        impose_result = impose_pdf(
+            input_pdf=result.output_pdf,
+            output_pdf=imposed_path,
             settings=signature_settings,
         )
+
         imposed_output_pdf = str(impose_result.output_pdf)
         imposed_blank_pages_added = impose_result.blank_pages_added
         imposed_total_signatures = impose_result.total_signatures
