@@ -11,13 +11,13 @@ from core.epub_service import (
     CleanupSettings,
     EpubToPdfResult,
     LayoutSettings,
-    extract_clean_text_from_html,
     load_epub_content,
     process_epub_to_pdf,
 )
-from core.impose_service import build_signature_settings, impose_pdf
+from core.impose_service import SignatureSettings, impose_pdf_for_binding
 
 LogCallback = Callable[[str], None]
+
 
 PAGE_SIZE_PRESETS_CM: dict[str, tuple[str, float, float]] = {
     "default-trade": ("Default trade (6 x 9 in)", 15.24, 22.86),
@@ -26,35 +26,37 @@ PAGE_SIZE_PRESETS_CM: dict[str, tuple[str, float, float]] = {
     "a6": ("A6", 10.5, 14.8),
     "letter": ("US Letter", 21.59, 27.94),
     "half-letter": ("Half Letter", 13.97, 21.59),
-    "trade-5x8": ("Trade 5 x 8 in)", 12.70, 20.32),
-    "trade-6x9": ("Trade 6 x 9 in)", 15.24, 22.86),
+    "trade-5x8": ("Trade 5 x 8 in", 12.70, 20.32),
+    "trade-6x9": ("Trade 6 x 9 in", 15.24, 22.86),
 }
+
 
 def build_cleanup_settings(variant: str) -> CleanupSettings:
     standard = CleanupSettings(
         join_soft_wrapped_lines=True,
         join_dialogue_continuations=True,
         merge_dialogue_paragraphs=False,
-        aggressive_mode=False,
         collapse_extra_blank_lines=True,
         preserve_scene_breaks=True,
     )
 
-    dialogue_merge = CleanupSettings(
+    aggressive = CleanupSettings(
         join_soft_wrapped_lines=True,
         join_dialogue_continuations=True,
-        merge_dialogue_paragraphs=True,
-        aggressive_mode=False,
+        merge_dialogue_paragraphs=False,
         collapse_extra_blank_lines=True,
         preserve_scene_breaks=True,
     )
 
-    aggressive = replace(dialogue_merge, aggressive_mode=True)
+    paragraph_dialogue_merge = replace(
+        aggressive,
+        merge_dialogue_paragraphs=True,
+    )
 
     variants = {
         "standard": standard,
-        "paragraph-dialogue-merge": dialogue_merge,
         "aggressive-cleanup": aggressive,
+        "paragraph-dialogue-merge": paragraph_dialogue_merge,
     }
 
     if variant not in variants:
@@ -74,12 +76,14 @@ def describe_variant(variant: str) -> str:
 
 def describe_spacing_mode(mode: str) -> str:
     normalized = (mode or "traditional").strip().lower()
+
     if normalized == "uniform":
         return "Uniform (no paragraph gap, no indents)"
     if normalized == "no-indents":
         return "No indents (keep paragraph spacing)"
     if normalized == "indented-compact":
         return "Indented compact (minimal paragraph gap + indents)"
+
     return "Traditional (paragraph spacing + indents)"
 
 
@@ -96,15 +100,13 @@ def describe_margin_preset(margin_preset: str) -> str:
 
     return mapping.get(preset, margin_preset)
 
+
 def describe_page_size_preset(page_size_preset: str) -> str:
     key = (page_size_preset or "default-trade").strip().lower()
-
     if key == "custom":
         return "Custom size"
-
     if key in PAGE_SIZE_PRESETS_CM:
         return PAGE_SIZE_PRESETS_CM[key][0]
-
     return page_size_preset
 
 
@@ -199,17 +201,6 @@ def build_layout_settings(
     return layout
 
 
-def build_raw_preview_cleanup_settings() -> CleanupSettings:
-    return CleanupSettings(
-        join_soft_wrapped_lines=False,
-        join_dialogue_continuations=False,
-        merge_dialogue_paragraphs=False,
-        aggressive_mode=False,
-        collapse_extra_blank_lines=False,
-        preserve_scene_breaks=True,
-    )
-
-
 def file_size_mb(path: Path | None) -> float | None:
     if path is None or not path.exists():
         return None
@@ -243,6 +234,7 @@ def build_file_stem(
     variant: str,
     spacing_mode: str,
     margin_preset: str,
+    page_size_preset: str,
 ) -> str:
     parts = [
         safe_filename_component(author),
@@ -252,6 +244,9 @@ def build_file_stem(
 
     if spacing_mode and spacing_mode != "traditional":
         parts.append(safe_filename_component(describe_spacing_mode(spacing_mode)))
+
+    if page_size_preset and page_size_preset != "default-trade":
+        parts.append(safe_filename_component(describe_page_size_preset(page_size_preset)))
 
     if margin_preset and margin_preset != "standard":
         parts.append(safe_filename_component(describe_margin_preset(margin_preset)))
@@ -268,6 +263,7 @@ def build_output_paths(
     variant: str,
     spacing_mode: str,
     margin_preset: str,
+    page_size_preset: str,
 ) -> tuple[Path, Path, Path, str]:
     stem = build_file_stem(
         author=used_author or input_epub.stem,
@@ -275,65 +271,13 @@ def build_output_paths(
         variant=variant,
         spacing_mode=spacing_mode,
         margin_preset=margin_preset,
+        page_size_preset=page_size_preset,
     )
 
     output_pdf_path = output_dir / f"{stem} - Interior.pdf"
     output_docx_path = output_dir / f"{stem} - Editable.docx"
-    output_markdown_path = output_dir / f"{stem} - Google Docs.md"
-
+    output_markdown_path = output_dir / f"{stem} - Editable.md"
     return output_pdf_path, output_docx_path, output_markdown_path, stem
-
-
-def build_imposed_output_path(
-    *,
-    output_dir: Path,
-    file_stem: str,
-    pages_per_signature: int,
-    binding_direction: str,
-) -> Path:
-    direction_label = "RTL" if binding_direction == "rtl" else "LTR"
-    return output_dir / (
-        f"{file_stem} - Imposed {pages_per_signature}pp {direction_label}.pdf"
-    )
-
-
-def build_preview_samples(
-    *,
-    sections: list[tuple[str, str]],
-    cleanup_settings: CleanupSettings,
-    max_samples: int = 3,
-) -> list[dict[str, str]]:
-    samples: list[dict[str, str]] = []
-    raw_settings = build_raw_preview_cleanup_settings()
-
-    for heading, raw_html in sections:
-        before = extract_clean_text_from_html(
-            raw_html,
-            drop_notes=False,
-            cleanup_settings=raw_settings,
-        ).strip()
-
-        after = extract_clean_text_from_html(
-            raw_html,
-            drop_notes=False,
-            cleanup_settings=cleanup_settings,
-        ).strip()
-
-        if not before or not after or before == after:
-            continue
-
-        samples.append(
-            {
-                "heading": (heading or "(Untitled section)").strip(),
-                "before": trim_preview_text(before),
-                "after": trim_preview_text(after),
-            }
-        )
-
-        if len(samples) >= max_samples:
-            break
-
-    return samples
 
 
 def render_baseline_pdf(
@@ -344,6 +288,7 @@ def render_baseline_pdf(
     used_author: str,
     spacing_mode: str,
     margin_preset: str,
+    page_size_preset: str,
     settings: LayoutSettings,
     log: LogCallback | None = None,
 ) -> tuple[Path, int, float | None]:
@@ -358,6 +303,7 @@ def render_baseline_pdf(
         variant=baseline_variant,
         spacing_mode=spacing_mode,
         margin_preset=margin_preset,
+        page_size_preset=page_size_preset,
     )
 
     if log:
@@ -414,21 +360,22 @@ def run_processing(
 
     cleanup_settings = build_cleanup_settings(variant)
     layout_settings = build_layout_settings(
-    paragraph_spacing_mode=paragraph_spacing_mode,
-    margin_preset=margin_preset,
-    page_size_preset=page_size_preset,
-    custom_trim_width_cm=custom_trim_width_cm,
-    custom_trim_height_cm=custom_trim_height_cm,
-    custom_margin_top_cm=custom_margin_top_cm,
-    custom_margin_bottom_cm=custom_margin_bottom_cm,
-    custom_margin_inside_cm=custom_margin_inside_cm,
-    custom_margin_outside_cm=custom_margin_outside_cm,
-)
+        paragraph_spacing_mode=paragraph_spacing_mode,
+        margin_preset=margin_preset,
+        page_size_preset=page_size_preset,
+        custom_trim_width_cm=custom_trim_width_cm,
+        custom_trim_height_cm=custom_trim_height_cm,
+        custom_margin_top_cm=custom_margin_top_cm,
+        custom_margin_bottom_cm=custom_margin_bottom_cm,
+        custom_margin_inside_cm=custom_margin_inside_cm,
+        custom_margin_outside_cm=custom_margin_outside_cm,
+    )
 
     create_imposed_pdf = (imposition_mode or "none").strip().lower() == "also"
 
     log("Reading EPUB metadata...")
     epub_content = load_epub_content(input_epub)
+
     used_title = epub_content.detected_title
     used_author = epub_content.detected_author
 
@@ -440,54 +387,44 @@ def run_processing(
         variant=variant,
         spacing_mode=paragraph_spacing_mode,
         margin_preset=margin_preset,
+        page_size_preset=page_size_preset,
     )
 
     log(f"Detected title: {used_title}")
     log(f"Detected author: {used_author}")
     log(f"Selected variant: {describe_variant(variant)}")
-log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
-log(f"Page size: {describe_page_size_preset(page_size_preset)}")
-log(f"Trim size: {layout_settings.trim_width_cm:.2f} cm x {layout_settings.trim_height_cm:.2f} cm")
-log(f"Margin preset: {describe_margin_preset(margin_preset)}")
-log(
-    "Margins (top / bottom / inside / outside): "
-    f"{layout_settings.margin_top_cm:.2f} / "
-    f"{layout_settings.margin_bottom_cm:.2f} / "
-    f"{layout_settings.margin_inside_cm:.2f} / "
-    f"{layout_settings.margin_outside_cm:.2f} cm"
-)
-log(f"Imposition mode: {describe_imposition_mode(imposition_mode)}")
-log(f"DOCX export: {'Yes (Word / LibreOffice)' if export_docx else 'No'}")
-log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
-
-    if create_imposed_pdf:
-        log(f"Pages per signature: {imposed_pages_per_signature}")
-        log(f"Binding direction: {describe_binding_direction(binding_direction)}")
-        log(f"Max blank end pages: {describe_max_end_padding(max_end_padding)}")
-
-    log("Building text cleanup preview samples...")
-
-    preview_samples = build_preview_samples(
-        sections=epub_content.sections,
-        cleanup_settings=cleanup_settings,
-        max_samples=3,
+    log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
+    log(f"Page size: {describe_page_size_preset(page_size_preset)}")
+    log(f"Trim size: {layout_settings.trim_width_cm:.2f} cm x {layout_settings.trim_height_cm:.2f} cm")
+    log(f"Margin preset: {describe_margin_preset(margin_preset)}")
+    log(
+        "Margins (top / bottom / inside / outside): "
+        f"{layout_settings.margin_top_cm:.2f} / "
+        f"{layout_settings.margin_bottom_cm:.2f} / "
+        f"{layout_settings.margin_inside_cm:.2f} / "
+        f"{layout_settings.margin_outside_cm:.2f} cm"
     )
+    log(f"Imposition mode: {describe_imposition_mode(imposition_mode)}")
+    log(f"DOCX export: {'Yes (Word / LibreOffice)' if export_docx else 'No'}")
+    log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
 
     baseline_pdf_path = None
     baseline_pages = None
     baseline_size_mb = None
+    page_delta = None
+    size_delta_mb = None
 
-    if variant != "standard":
-        baseline_pdf_path, baseline_pages, baseline_size_mb = render_baseline_pdf(
-            input_epub=input_epub,
-            output_dir=output_dir,
-            used_title=used_title,
-            used_author=used_author,
-            spacing_mode=paragraph_spacing_mode,
-            margin_preset=margin_preset,
-            settings=layout_settings,
-            log=log,
-        )
+    baseline_pdf_path, baseline_pages, baseline_size_mb = render_baseline_pdf(
+        input_epub=input_epub,
+        output_dir=output_dir,
+        used_title=used_title,
+        used_author=used_author,
+        spacing_mode=paragraph_spacing_mode,
+        margin_preset=margin_preset,
+        page_size_preset=page_size_preset,
+        settings=layout_settings,
+        log=log,
+    )
 
     log("Rendering selected output files...")
     result: EpubToPdfResult = process_epub_to_pdf(
@@ -510,12 +447,20 @@ log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
     markdown_size_mb = file_size_mb(result.output_markdown) if result.output_markdown else None
     output_pdf_pages = pdf_page_count(result.output_pdf)
 
-    page_delta = None
-    size_delta_mb = None
     if baseline_pages is not None:
         page_delta = output_pdf_pages - baseline_pages
     if baseline_size_mb is not None and pdf_size_mb is not None:
         size_delta_mb = pdf_size_mb - baseline_size_mb
+
+    preview_samples = []
+    for title, section_html in epub_content.sections[:3]:
+        preview_samples.append(
+            {
+                "heading": title,
+                "before": trim_preview_text(section_html),
+                "after": trim_preview_text(section_html),
+            }
+        )
 
     imposed_output_pdf = ""
     imposed_blank_pages_added = None
@@ -526,38 +471,27 @@ log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
 
     if create_imposed_pdf:
         log("Creating imposed signature PDF...")
-        signature_settings = build_signature_settings(
+        imposed_signature_settings_pages = imposed_pages_per_signature
+        signature_settings = SignatureSettings(
             pages_per_signature=imposed_pages_per_signature,
             binding_direction=binding_direction,
             max_end_padding=max_end_padding,
         )
-        imposed_output_path = build_imposed_output_path(
-            output_dir=output_dir,
-            file_stem=file_stem,
-            pages_per_signature=signature_settings.pages_per_signature,
-            binding_direction=signature_settings.binding_direction,
-        )
-        imposed_result = impose_pdf(
-            input_pdf=result.output_pdf,
-            output_pdf=imposed_output_path,
+        imposed_path = output_dir / f"{file_stem} - Imposed.pdf"
+        impose_result = impose_pdf_for_binding(
+            input_pdf_path=result.output_pdf,
+            output_pdf_path=imposed_path,
             settings=signature_settings,
         )
-        imposed_output_pdf = str(imposed_result.output_pdf)
-        imposed_blank_pages_added = imposed_result.blank_pages_added
-        imposed_total_signatures = imposed_result.total_signatures
-        imposed_output_sheet_sides = imposed_result.output_sheet_sides
-        imposed_physical_sheets_total = imposed_result.physical_sheets_total
-        imposed_signature_settings_pages = signature_settings.pages_per_signature
-
-        log(f"Imposed PDF created: {imposed_output_pdf}")
+        imposed_output_pdf = str(impose_result.output_pdf)
+        imposed_blank_pages_added = impose_result.blank_pages_added
+        imposed_total_signatures = impose_result.total_signatures
+        imposed_output_sheet_sides = impose_result.output_sheet_sides
+        imposed_physical_sheets_total = impose_result.physical_sheets_total
 
     return {
-        "output_pdf": str(result.output_pdf),
-        "output_docx": str(result.output_docx) if result.output_docx else "",
-        "output_markdown": str(result.output_markdown) if result.output_markdown else "",
         "title": result.used_title,
         "author": result.used_author,
-        "output_dir": str(result.output_dir),
         "variant": variant,
         "variant_label": describe_variant(variant),
         "file_stem": file_stem,
@@ -576,8 +510,16 @@ log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
         "size_delta_mb_vs_baseline": size_delta_mb,
         "paragraph_spacing_mode": paragraph_spacing_mode,
         "paragraph_spacing_mode_label": describe_spacing_mode(paragraph_spacing_mode),
+        "page_size_preset": page_size_preset,
+        "page_size_preset_label": describe_page_size_preset(page_size_preset),
+        "trim_width_cm": layout_settings.trim_width_cm,
+        "trim_height_cm": layout_settings.trim_height_cm,
         "margin_preset": margin_preset,
         "margin_preset_label": describe_margin_preset(margin_preset),
+        "margin_top_cm": layout_settings.margin_top_cm,
+        "margin_bottom_cm": layout_settings.margin_bottom_cm,
+        "margin_inside_cm": layout_settings.margin_inside_cm,
+        "margin_outside_cm": layout_settings.margin_outside_cm,
         "imposition_mode": imposition_mode,
         "imposition_mode_label": describe_imposition_mode(imposition_mode),
         "create_imposed_pdf": create_imposed_pdf,
@@ -591,14 +533,10 @@ log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
         "imposed_total_signatures": imposed_total_signatures,
         "imposed_output_sheet_sides": imposed_output_sheet_sides,
         "imposed_physical_sheets_total": imposed_physical_sheets_total,
+        "output_pdf": str(result.output_pdf),
+        "output_docx": str(result.output_docx) if result.output_docx else "",
+        "output_markdown": str(result.output_markdown) if result.output_markdown else "",
+        "output_dir": str(result.output_dir),
         "export_docx": export_docx,
         "export_markdown": export_markdown,
-        "page_size_preset": page_size_preset,
-        "page_size_preset_label": describe_page_size_preset(page_size_preset),
-        "trim_width_cm": layout_settings.trim_width_cm,
-        "trim_height_cm": layout_settings.trim_height_cm,
-        "margin_top_cm": layout_settings.margin_top_cm,
-        "margin_bottom_cm": layout_settings.margin_bottom_cm,
-        "margin_inside_cm": layout_settings.margin_inside_cm,
-        "margin_outside_cm": layout_settings.margin_outside_cm,
     }
