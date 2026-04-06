@@ -146,7 +146,7 @@ QPushButton#primaryButton:pressed {
 
 QCheckBox {
     spacing: 8px;
-    padding: 4px 0;
+    padding: 2px 0;
     color: #231b2f;
     font-weight: 600;
 }
@@ -211,11 +211,13 @@ class MainWindow(QMainWindow):
         self.variant_combo.addItem("Dialogue Merge", "paragraph-dialogue-merge")
         self.variant_combo.addItem("Aggressive Cleanup", "aggressive-cleanup")
 
-        self.export_docx_btn = QCheckBox("Export DOCX (Word / LibreOffice)")
+        self.export_docx_btn = QCheckBox("DOCX (.docx)")
         self.export_docx_btn.setChecked(True)
+        self.export_docx_btn.setToolTip("Export an editable DOCX for Word / LibreOffice.")
 
-        self.export_markdown_btn = QCheckBox("Export Markdown (Google Docs)")
+        self.export_markdown_btn = QCheckBox("Markdown (.md)")
         self.export_markdown_btn.setChecked(True)
+        self.export_markdown_btn.setToolTip("Export editable Markdown for Google Docs or other editors.")
 
         self.spacing_mode_combo = QComboBox()
         self.spacing_mode_combo.addItem("Traditional (paragraph spacing + indents)", "traditional")
@@ -424,8 +426,8 @@ class MainWindow(QMainWindow):
         top_splitter.addWidget(self._build_book_group())
         top_splitter.addWidget(self._build_cleanup_group())
         top_splitter.setStretchFactor(0, 3)
-        top_splitter.setStretchFactor(1, 2)
-        top_splitter.setSizes([700, 500])
+        top_splitter.setStretchFactor(1, 3)
+        top_splitter.setSizes([640, 560])
         root.addWidget(top_splitter, 0)
 
         action_row = QHBoxLayout()
@@ -451,7 +453,7 @@ class MainWindow(QMainWindow):
 
     def _build_book_group(self) -> QGroupBox:
         group = QGroupBox("Book")
-        group.setMinimumWidth(520)
+        group.setMinimumWidth(460)
         group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QGridLayout(group)
@@ -479,7 +481,7 @@ class MainWindow(QMainWindow):
 
     def _build_cleanup_group(self) -> QGroupBox:
         group = QGroupBox("Cleanup, layout, binding, and outputs")
-        group.setMinimumWidth(440)
+        group.setMinimumWidth(500)
         group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QGridLayout(group)
@@ -527,28 +529,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.custom_margin_widget, 6, 1)
 
         layout.addWidget(QLabel("Editable outputs"), 7, 0)
+        layout.addWidget(self.export_docx_btn, 7, 1)
 
-        outputs_widget = QWidget()
-        outputs_layout = QVBoxLayout(outputs_widget)
-        outputs_layout.setContentsMargins(0, 0, 0, 0)
-        outputs_layout.setSpacing(6)
-        outputs_layout.addWidget(self.export_docx_btn)
-        outputs_layout.addWidget(self.export_markdown_btn)
-        outputs_layout.addStretch()
+        layout.addWidget(QLabel(""), 8, 0)
+        layout.addWidget(self.export_markdown_btn, 8, 1)
 
-        layout.addWidget(outputs_widget, 7, 1)
+        layout.addWidget(QLabel("Imposition output"), 9, 0)
+        layout.addWidget(self.imposition_mode_combo, 9, 1)
 
-        layout.addWidget(QLabel("Imposition output"), 8, 0)
-        layout.addWidget(self.imposition_mode_combo, 8, 1)
+        layout.addWidget(QLabel("Pages per signature"), 10, 0)
+        layout.addWidget(self.signature_pages_combo, 10, 1)
 
-        layout.addWidget(QLabel("Pages per signature"), 9, 0)
-        layout.addWidget(self.signature_pages_combo, 9, 1)
+        layout.addWidget(QLabel("Binding direction"), 11, 0)
+        layout.addWidget(self.binding_direction_combo, 11, 1)
 
-        layout.addWidget(QLabel("Binding direction"), 10, 0)
-        layout.addWidget(self.binding_direction_combo, 10, 1)
-
-        layout.addWidget(QLabel("Max blank end pages"), 11, 0)
-        layout.addWidget(self.max_end_padding_combo, 11, 1)
+        layout.addWidget(QLabel("Max blank end pages"), 12, 0)
+        layout.addWidget(self.max_end_padding_combo, 12, 1)
 
         layout.setColumnStretch(1, 1)
         return group
