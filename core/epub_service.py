@@ -12,6 +12,12 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from ebooklib import ITEM_DOCUMENT, epub
 from docx import Document
 
+from docx.enum.section import WD_SECTION_START
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt
+
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 try:
@@ -786,6 +792,70 @@ def render_pdf(html_doc: str, output_pdf_path: Path) -> None:
     output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
     HTML(string=html_doc).write_pdf(str(output_pdf_path))
 
+def _add_page_number_field(paragraph) -> None:
+    run = paragraph.add_run()
+
+    fld_begin = OxmlElement("w:fldChar")
+    fld_begin.set(qn("w:fldCharType"), "begin")
+
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = " PAGE "
+
+    fld_separate = OxmlElement("w:fldChar")
+    fld_separate.set(qn("w:fldCharType"), "separate")
+
+    text = OxmlElement("w:t")
+    text.text = "1"
+
+    fld_end = OxmlElement("w:fldChar")
+    fld_end.set(qn("w:fldCharType"), "end")
+
+    run._r.append(fld_begin)
+    run._r.append(instr)
+    run._r.append(fld_separate)
+    run._r.append(text)
+    run._r.append(fld_end)
+
+
+def _configure_docx_section(section, settings: LayoutSettings) -> None:
+    section.page_width = Cm(settings.trim_width_cm)
+    section.page_height = Cm(settings.trim_height_cm)
+
+    section.top_margin = Cm(settings.margin_top_cm)
+    section.bottom_margin = Cm(settings.margin_bottom_cm)
+    section.left_margin = Cm(settings.margin_inside_cm)
+    section.right_margin = Cm(settings.margin_outside_cm)
+
+    section.footer_distance = Cm(0.8)
+
+    footer = section.footer
+    footer_p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+    footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_page_number_field(footer_p)
+
+
+def _apply_docx_paragraph_format(paragraph, settings: LayoutSettings, *, is_first_in_block: bool) -> None:
+    fmt = paragraph.paragraph_format
+    mode = (settings.paragraph_spacing_mode or "traditional").strip().lower()
+
+    fmt.line_spacing = settings.line_height
+    fmt.space_before = Pt(0)
+
+    if mode == "uniform":
+        fmt.space_after = Pt(0)
+        fmt.first_line_indent = Pt(0)
+    elif mode == "no-indents":
+        fmt.space_after = Pt(settings.font_size_pt * 0.65)
+        fmt.first_line_indent = Pt(0)
+    elif mode == "indented-compact":
+        fmt.space_after = Pt(0)
+        fmt.first_line_indent = Pt(0 if is_first_in_block else settings.font_size_pt * 1.2)
+    else:
+        fmt.space_after = Pt(settings.font_size_pt * 0.65)
+        fmt.first_line_indent = Pt(0 if is_first_in_block else settings.font_size_pt * 1.2)
+
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
 def export_clean_docx(
     *,
@@ -793,30 +863,76 @@ def export_clean_docx(
     author: str,
     sections: List[Tuple[str, str]],
     output_path: str | Path,
+    settings: LayoutSettings,
 ) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     doc = Document()
-    doc.add_heading(title, level=0)
+
+    # Base document section
+    section = doc.sections[0]
+    _configure_docx_section(section, settings)
+
+    # Normal style
+    normal_style = doc.styles["Normal"]
+    normal_style.font.size = Pt(settings.font_size_pt)
+
+    # Title page
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_para.add_run(title)
+    title_run.bold = True
+    title_run.font.size = Pt(settings.font_size_pt * 2.0)
+
     if author.strip():
-        doc.add_paragraph(author)
+        author_para = doc.add_paragraph()
+        author_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        author_run = author_para.add_run(author)
+        author_run.font.size = Pt(settings.font_size_pt * 1.15)
 
     first_section = True
+
     for heading, text in sections:
-        if not first_section:
+        if first_section:
             doc.add_page_break()
-        first_section = False
+            first_section = False
+        else:
+            new_section = doc.add_section(WD_SECTION_START.NEW_PAGE)
+            _configure_docx_section(new_section, settings)
 
         if heading.strip():
-            doc.add_heading(heading, level=1)
+            heading_para = doc.add_paragraph()
+            heading_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            heading_run = heading_para.add_run(heading.strip())
+            heading_run.bold = True
+            heading_run.font.size = Pt(settings.font_size_pt * 1.45)
+            heading_para.paragraph_format.space_after = Pt(settings.font_size_pt * 1.8)
 
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        first_body_paragraph = True
+
         for para in paragraphs:
+            p = doc.add_paragraph()
+
             if is_scene_break(para) or para == "***":
-                doc.add_paragraph("***")
-            else:
-                doc.add_paragraph(para)
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = p.add_run("***")
+                run.bold = False
+                p.paragraph_format.space_before = Pt(settings.font_size_pt * 1.2)
+                p.paragraph_format.space_after = Pt(settings.font_size_pt * 1.2)
+                p.paragraph_format.first_line_indent = Pt(0)
+                first_body_paragraph = True
+                continue
+
+            run = p.add_run(para)
+            run.font.size = Pt(settings.font_size_pt)
+            _apply_docx_paragraph_format(
+                p,
+                settings,
+                is_first_in_block=first_body_paragraph,
+            )
+            first_body_paragraph = False
 
     doc.save(str(output_path))
     return output_path
@@ -923,17 +1039,18 @@ def process_epub_to_pdf(
 
     output_docx: Path | None = None
     if export_docx:
-        output_docx = (
-            Path(output_docx_path)
-            if output_docx_path
-            else default_output_docx_path(output_pdf.parent, book_slug)
-        )
-        export_clean_docx(
-            title=used_title,
-            author=used_author,
-            sections=clean_text_sections or [],
-            output_path=output_docx,
-        )
+    output_docx = (
+        Path(output_docx_path)
+        if output_docx_path
+        else default_output_docx_path(output_pdf.parent, book_slug)
+    )
+    export_clean_docx(
+        title=used_title,
+        author=used_author,
+        sections=clean_text_sections or [],
+        output_path=output_docx,
+        settings=settings,
+    )
 
     output_markdown: Path | None = None
     if export_markdown:
