@@ -19,6 +19,16 @@ from core.impose_service import build_signature_settings, impose_pdf
 
 LogCallback = Callable[[str], None]
 
+PAGE_SIZE_PRESETS_CM: dict[str, tuple[str, float, float]] = {
+    "default-trade": ("Default trade (6 x 9 in)", 15.24, 22.86),
+    "a4": ("A4", 21.0, 29.7),
+    "a5": ("A5", 14.8, 21.0),
+    "a6": ("A6", 10.5, 14.8),
+    "letter": ("US Letter", 21.59, 27.94),
+    "half-letter": ("Half Letter", 13.97, 21.59),
+    "trade-5x8": ("Trade 5 x 8 in)", 12.70, 20.32),
+    "trade-6x9": ("Trade 6 x 9 in)", 15.24, 22.86),
+}
 
 def build_cleanup_settings(variant: str) -> CleanupSettings:
     standard = CleanupSettings(
@@ -75,13 +85,27 @@ def describe_spacing_mode(mode: str) -> str:
 
 def describe_margin_preset(margin_preset: str) -> str:
     preset = (margin_preset or "standard").strip().lower()
+
     mapping = {
         "standard": "Standard",
         "compact": "Compact",
         "wide": "Wide",
         "large-print": "Large print friendly",
+        "custom": "Custom margins",
     }
+
     return mapping.get(preset, margin_preset)
+
+def describe_page_size_preset(page_size_preset: str) -> str:
+    key = (page_size_preset or "default-trade").strip().lower()
+
+    if key == "custom":
+        return "Custom size"
+
+    if key in PAGE_SIZE_PRESETS_CM:
+        return PAGE_SIZE_PRESETS_CM[key][0]
+
+    return page_size_preset
 
 
 def describe_binding_direction(binding_direction: str) -> str:
@@ -110,13 +134,34 @@ def build_layout_settings(
     *,
     paragraph_spacing_mode: str,
     margin_preset: str,
+    page_size_preset: str,
+    custom_trim_width_cm: float | None,
+    custom_trim_height_cm: float | None,
+    custom_margin_top_cm: float | None,
+    custom_margin_bottom_cm: float | None,
+    custom_margin_inside_cm: float | None,
+    custom_margin_outside_cm: float | None,
 ) -> LayoutSettings:
     layout = LayoutSettings(
         paragraph_spacing_mode=paragraph_spacing_mode,
     )
 
-    preset = (margin_preset or "standard").strip().lower()
+    size_key = (page_size_preset or "default-trade").strip().lower()
+    if size_key == "custom":
+        if custom_trim_width_cm is None or custom_trim_height_cm is None:
+            raise ValueError("Custom page size selected but width/height were not provided.")
+        if custom_trim_width_cm <= 0 or custom_trim_height_cm <= 0:
+            raise ValueError("Custom page width and height must be greater than zero.")
+        layout.trim_width_cm = custom_trim_width_cm
+        layout.trim_height_cm = custom_trim_height_cm
+    elif size_key in PAGE_SIZE_PRESETS_CM:
+        _, width_cm, height_cm = PAGE_SIZE_PRESETS_CM[size_key]
+        layout.trim_width_cm = width_cm
+        layout.trim_height_cm = height_cm
+    else:
+        raise ValueError(f"Unknown page size preset: {page_size_preset}")
 
+    preset = (margin_preset or "standard").strip().lower()
     if preset == "compact":
         layout.margin_top_cm = 1.2
         layout.margin_bottom_cm = 1.2
@@ -130,13 +175,26 @@ def build_layout_settings(
     elif preset == "large-print":
         layout.margin_top_cm = 2.0
         layout.margin_bottom_cm = 2.0
-        layout.margin_inside_cm = 2.2
-        layout.margin_outside_cm = 1.4
-    else:
-        layout.margin_top_cm = 1.5
-        layout.margin_bottom_cm = 1.5
-        layout.margin_inside_cm = 1.8
-        layout.margin_outside_cm = 1.0
+        layout.margin_inside_cm = 2.3
+        layout.margin_outside_cm = 1.5
+    elif preset == "custom":
+        values = [
+            custom_margin_top_cm,
+            custom_margin_bottom_cm,
+            custom_margin_inside_cm,
+            custom_margin_outside_cm,
+        ]
+        if any(v is None for v in values):
+            raise ValueError("Custom margins selected but one or more margin values were not provided.")
+        if any(v <= 0 for v in values):
+            raise ValueError("All custom margin values must be greater than zero.")
+
+        layout.margin_top_cm = custom_margin_top_cm
+        layout.margin_bottom_cm = custom_margin_bottom_cm
+        layout.margin_inside_cm = custom_margin_inside_cm
+        layout.margin_outside_cm = custom_margin_outside_cm
+    elif preset != "standard":
+        raise ValueError(f"Unknown margin preset: {margin_preset}")
 
     return layout
 
@@ -332,6 +390,13 @@ def run_processing(
     export_markdown: bool,
     paragraph_spacing_mode: str,
     margin_preset: str,
+    page_size_preset: str,
+    custom_trim_width_cm: float | None,
+    custom_trim_height_cm: float | None,
+    custom_margin_top_cm: float | None,
+    custom_margin_bottom_cm: float | None,
+    custom_margin_inside_cm: float | None,
+    custom_margin_outside_cm: float | None,
     imposition_mode: str,
     imposed_pages_per_signature: int,
     binding_direction: str,
@@ -349,9 +414,16 @@ def run_processing(
 
     cleanup_settings = build_cleanup_settings(variant)
     layout_settings = build_layout_settings(
-        paragraph_spacing_mode=paragraph_spacing_mode,
-        margin_preset=margin_preset,
-    )
+    paragraph_spacing_mode=paragraph_spacing_mode,
+    margin_preset=margin_preset,
+    page_size_preset=page_size_preset,
+    custom_trim_width_cm=custom_trim_width_cm,
+    custom_trim_height_cm=custom_trim_height_cm,
+    custom_margin_top_cm=custom_margin_top_cm,
+    custom_margin_bottom_cm=custom_margin_bottom_cm,
+    custom_margin_inside_cm=custom_margin_inside_cm,
+    custom_margin_outside_cm=custom_margin_outside_cm,
+)
 
     create_imposed_pdf = (imposition_mode or "none").strip().lower() == "also"
 
@@ -373,11 +445,20 @@ def run_processing(
     log(f"Detected title: {used_title}")
     log(f"Detected author: {used_author}")
     log(f"Selected variant: {describe_variant(variant)}")
-    log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
-    log(f"Margin preset: {describe_margin_preset(margin_preset)}")
-    log(f"Imposition mode: {describe_imposition_mode(imposition_mode)}")
-    log(f"DOCX export: {'Yes (Word / LibreOffice)' if export_docx else 'No'}")
-    log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
+log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
+log(f"Page size: {describe_page_size_preset(page_size_preset)}")
+log(f"Trim size: {layout_settings.trim_width_cm:.2f} cm x {layout_settings.trim_height_cm:.2f} cm")
+log(f"Margin preset: {describe_margin_preset(margin_preset)}")
+log(
+    "Margins (top / bottom / inside / outside): "
+    f"{layout_settings.margin_top_cm:.2f} / "
+    f"{layout_settings.margin_bottom_cm:.2f} / "
+    f"{layout_settings.margin_inside_cm:.2f} / "
+    f"{layout_settings.margin_outside_cm:.2f} cm"
+)
+log(f"Imposition mode: {describe_imposition_mode(imposition_mode)}")
+log(f"DOCX export: {'Yes (Word / LibreOffice)' if export_docx else 'No'}")
+log(f"Markdown export: {'Yes (Google Docs)' if export_markdown else 'No'}")
 
     if create_imposed_pdf:
         log(f"Pages per signature: {imposed_pages_per_signature}")
@@ -512,4 +593,12 @@ def run_processing(
         "imposed_physical_sheets_total": imposed_physical_sheets_total,
         "export_docx": export_docx,
         "export_markdown": export_markdown,
+        "page_size_preset": page_size_preset,
+        "page_size_preset_label": describe_page_size_preset(page_size_preset),
+        "trim_width_cm": layout_settings.trim_width_cm,
+        "trim_height_cm": layout_settings.trim_height_cm,
+        "margin_top_cm": layout_settings.margin_top_cm,
+        "margin_bottom_cm": layout_settings.margin_bottom_cm,
+        "margin_inside_cm": layout_settings.margin_inside_cm,
+        "margin_outside_cm": layout_settings.margin_outside_cm,
     }
