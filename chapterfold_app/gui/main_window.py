@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -143,11 +144,28 @@ QPushButton#primaryButton:pressed {
     background: #611f98;
 }
 
-QPushButton#toggleOn {
+QCheckBox {
+    spacing: 8px;
+    padding: 4px 0;
+    color: #231b2f;
+    font-weight: 600;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+}
+
+QCheckBox::indicator:unchecked {
+    border: 1px solid #bfaed6;
+    border-radius: 4px;
+    background: #ffffff;
+}
+
+QCheckBox::indicator:checked {
+    border: 1px solid #8b4fd8;
+    border-radius: 4px;
     background: #ead7fb;
-    border: 1px solid #b98ae8;
-    color: #4b1f6f;
-    font-weight: 700;
 }
 
 QTextEdit#resultsBox {
@@ -193,12 +211,10 @@ class MainWindow(QMainWindow):
         self.variant_combo.addItem("Dialogue Merge", "paragraph-dialogue-merge")
         self.variant_combo.addItem("Aggressive Cleanup", "aggressive-cleanup")
 
-        self.export_docx_btn = QPushButton("DOCX for Word / LibreOffice")
-        self.export_docx_btn.setCheckable(True)
+        self.export_docx_btn = QCheckBox("Export DOCX (Word / LibreOffice)")
         self.export_docx_btn.setChecked(True)
 
-        self.export_markdown_btn = QPushButton("Markdown for Google Docs")
-        self.export_markdown_btn.setCheckable(True)
+        self.export_markdown_btn = QCheckBox("Export Markdown (Google Docs)")
         self.export_markdown_btn.setChecked(True)
 
         self.spacing_mode_combo = QComboBox()
@@ -353,7 +369,6 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._connect_signals()
-        self._refresh_output_toggle_styles()
 
         default_output = Path.cwd()
         self.output_edit.setText(str(default_output))
@@ -366,12 +381,7 @@ class MainWindow(QMainWindow):
         return label
 
     def _refresh_output_toggle_styles(self) -> None:
-        self.export_docx_btn.setObjectName("toggleOn" if self.export_docx_btn.isChecked() else "")
-        self.export_markdown_btn.setObjectName("toggleOn" if self.export_markdown_btn.isChecked() else "")
-        self.style().unpolish(self.export_docx_btn)
-        self.style().polish(self.export_docx_btn)
-        self.style().unpolish(self.export_markdown_btn)
-        self.style().polish(self.export_markdown_btn)
+        return
 
     def _build_two_spin_row(self, left_label: str, left_spin, right_label: str, right_spin) -> QWidget:
         container = QWidget()
@@ -517,12 +527,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.custom_margin_widget, 6, 1)
 
         layout.addWidget(QLabel("Editable outputs"), 7, 0)
-        outputs_layout = QVBoxLayout()
+
+        outputs_widget = QWidget()
+        outputs_layout = QVBoxLayout(outputs_widget)
         outputs_layout.setContentsMargins(0, 0, 0, 0)
-        outputs_layout.setSpacing(8)
+        outputs_layout.setSpacing(6)
         outputs_layout.addWidget(self.export_docx_btn)
         outputs_layout.addWidget(self.export_markdown_btn)
-        layout.addLayout(outputs_layout, 7, 1)
+        outputs_layout.addStretch()
+
+        layout.addWidget(outputs_widget, 7, 1)
 
         layout.addWidget(QLabel("Imposition output"), 8, 0)
         layout.addWidget(self.imposition_mode_combo, 8, 1)
