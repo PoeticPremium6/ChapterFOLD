@@ -1039,7 +1039,7 @@ def process_epub_to_pdf(
 
     output_docx: Path | None = None
     if export_docx:
-    output_docx = (
+        output_docx = (
         Path(output_docx_path)
         if output_docx_path
         else default_output_docx_path(output_pdf.parent, book_slug)
