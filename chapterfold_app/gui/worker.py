@@ -26,20 +26,12 @@ class Worker(QObject):
         export_markdown: bool,
         paragraph_spacing_mode: str,
         margin_preset: str,
-        page_size_preset: str,
-        custom_trim_width_cm: float | None,
-        custom_trim_height_cm: float | None,
-        custom_margin_top_cm: float | None,
-        custom_margin_bottom_cm: float | None,
-        custom_margin_inside_cm: float | None,
-        custom_margin_outside_cm: float | None,
         imposition_mode: str,
         imposed_pages_per_signature: int,
         binding_direction: str,
         max_end_padding: int | None,
     ) -> None:
         super().__init__()
-
         self.input_epub = input_epub
         self.output_dir = output_dir
         self.variant = variant
@@ -47,13 +39,6 @@ class Worker(QObject):
         self.export_markdown = export_markdown
         self.paragraph_spacing_mode = paragraph_spacing_mode
         self.margin_preset = margin_preset
-        self.page_size_preset = page_size_preset
-        self.custom_trim_width_cm = custom_trim_width_cm
-        self.custom_trim_height_cm = custom_trim_height_cm
-        self.custom_margin_top_cm = custom_margin_top_cm
-        self.custom_margin_bottom_cm = custom_margin_bottom_cm
-        self.custom_margin_inside_cm = custom_margin_inside_cm
-        self.custom_margin_outside_cm = custom_margin_outside_cm
         self.imposition_mode = imposition_mode
         self.imposed_pages_per_signature = imposed_pages_per_signature
         self.binding_direction = binding_direction
@@ -70,13 +55,6 @@ class Worker(QObject):
                 export_markdown=self.export_markdown,
                 paragraph_spacing_mode=self.paragraph_spacing_mode,
                 margin_preset=self.margin_preset,
-                page_size_preset=self.page_size_preset,
-                custom_trim_width_cm=self.custom_trim_width_cm,
-                custom_trim_height_cm=self.custom_trim_height_cm,
-                custom_margin_top_cm=self.custom_margin_top_cm,
-                custom_margin_bottom_cm=self.custom_margin_bottom_cm,
-                custom_margin_inside_cm=self.custom_margin_inside_cm,
-                custom_margin_outside_cm=self.custom_margin_outside_cm,
                 imposition_mode=self.imposition_mode,
                 imposed_pages_per_signature=self.imposed_pages_per_signature,
                 binding_direction=self.binding_direction,
@@ -84,14 +62,18 @@ class Worker(QObject):
                 log_callback=self.log.emit,
             )
             self.success.emit(payload)
+
         except (BadZipFile, EpubException):
             self.error.emit(
                 "The selected file is not a valid EPUB archive.\n\n"
                 "Please make sure you selected a real .epub file and that it is not corrupted."
             )
+
         except FileNotFoundError as exc:
             self.error.emit(str(exc))
+
         except Exception:
             self.error.emit(traceback.format_exc())
+
         finally:
             self.finished.emit()
