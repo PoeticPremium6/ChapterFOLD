@@ -793,28 +793,23 @@ def render_pdf(html_doc: str, output_pdf_path: Path) -> None:
     HTML(string=html_doc).write_pdf(str(output_pdf_path))
 
 def _add_page_number_field(paragraph) -> None:
-    run = paragraph.add_run()
-
     fld_begin = OxmlElement("w:fldChar")
     fld_begin.set(qn("w:fldCharType"), "begin")
 
     instr = OxmlElement("w:instrText")
     instr.set(qn("xml:space"), "preserve")
-    instr.text = " PAGE "
+    instr.text = "PAGE"
 
     fld_separate = OxmlElement("w:fldChar")
     fld_separate.set(qn("w:fldCharType"), "separate")
 
-    text = OxmlElement("w:t")
-    text.text = "1"
-
     fld_end = OxmlElement("w:fldChar")
     fld_end.set(qn("w:fldCharType"), "end")
 
+    run = paragraph.add_run()
     run._r.append(fld_begin)
     run._r.append(instr)
     run._r.append(fld_separate)
-    run._r.append(text)
     run._r.append(fld_end)
 
 
@@ -830,7 +825,14 @@ def _configure_docx_section(section, settings: LayoutSettings) -> None:
     section.footer_distance = Cm(0.8)
 
     footer = section.footer
-    footer_p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+    footer.is_linked_to_previous = False
+
+    # Clear all existing footer paragraphs/runs so page number is only added once
+    for paragraph in footer.paragraphs:
+        p = paragraph._element
+        p.getparent().remove(p)
+
+    footer_p = footer.add_paragraph()
     footer_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _add_page_number_field(footer_p)
 
