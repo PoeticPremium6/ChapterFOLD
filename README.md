@@ -6,6 +6,10 @@
 
 Convert EPUBs into cleaner, print-ready PDF and DOCX interiors for bookbinding and personal printing.
 
+cd ~/Desktop/BioStudio/Github/ChapterFOLD
+source ChapterFOLD/bin/activate
+python chapterfold_app/app.py
+
 ## What ChapterFOLD does
 
 ChapterFOLD is a Windows-first tool for turning EPUB books into cleaner, more practical outputs for printing, editing, and bookbinding.
