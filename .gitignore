@@ -101,3 +101,6 @@ Thumbs.db
 # Local full-book Gutenberg fixtures and generated reports
 tests/fixtures/gutenberg/raw/
 reports/
+
+# Local batch assessment outputs / private fixtures
+batch_outputs/
