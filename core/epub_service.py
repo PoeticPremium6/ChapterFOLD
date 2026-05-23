@@ -17,6 +17,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
+from core.gutenberg_inline_trim import trim_gutenberg_boilerplate_from_sections
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -319,6 +320,7 @@ def load_epub_content(epub_path: Path) -> EpubContent:
         if str(record.get("body_html", "")).strip()
     ]
 
+    sections = trim_gutenberg_boilerplate_from_sections(sections)
     content = EpubContent(
         detected_title=title,
         detected_author=author,

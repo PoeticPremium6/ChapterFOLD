@@ -26,6 +26,7 @@ REQUIRED_IMPORTS = [
     ("core.diagnostics", "core.diagnostics"),
     ("core.gutenberg_selector", "core.gutenberg_selector"),
     ("core.gutenberg_content_filter", "core.gutenberg_content_filter"),
+    ("core.gutenberg_inline_trim", "core.gutenberg_inline_trim"),
     ("weasyprint", "weasyprint"),
 ]
 
