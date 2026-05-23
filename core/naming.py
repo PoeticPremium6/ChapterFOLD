@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Optional
 
 
@@ -50,16 +50,57 @@ def imposed_pdf_name(book_slug: str, sheets_per_signature: int, pages_per_signat
     )
 
 
-def infer_book_slug_from_interior_pdf(input_pdf: Path) -> str:
-    stem = input_pdf.stem
+
+def _path_name_and_parent_name(path: Path) -> tuple[str, str]:
+    """Return filename and parent name for POSIX or Windows-style paths.
+
+    Tests may pass Windows paths while running on Linux. pathlib.Path treats
+    backslashes as literal characters on POSIX, so use PureWindowsPath when a
+    string contains backslashes.
+    """
+
+    raw = str(path)
+    if "\\" in raw:
+        win_path = PureWindowsPath(raw)
+        return win_path.name, win_path.parent.name
+    return path.name, path.parent.name
+
+def infer_book_slug_from_interior_pdf(path):
+    """Infer the book slug from an interior PDF path.
+
+    Handles both native paths and Windows-style strings while running on Linux.
+    Examples:
+    - C:\books\name_output\name__interior.pdf -> name
+    - C:\books\name_output\interior.pdf -> name
+    """
+    filename = _any_name(path)
+    stem = filename[:-4] if filename.lower().endswith(".pdf") else filename
 
     if stem.endswith("__interior"):
         return stem[: -len("__interior")]
 
-    if stem == "interior":
-        parent_stem = input_pdf.parent.name
-        if parent_stem.endswith("_output"):
-            return parent_stem[: -len("_output")] or "book"
-        return parent_stem or "book"
+    if stem.lower() == "interior":
+        parent = _any_parent_name(path)
+        if parent.endswith("_output"):
+            return parent[: -len("_output")]
+        return parent or stem
 
-    return slugify(stem)
+    if stem.endswith("_interior"):
+        return stem[: -len("_interior")]
+
+    # Fallback: keep previous behaviour broadly slug-like without eating path separators.
+    return stem.replace(" ", "-").lower()
+
+def _split_any_path(path_obj) -> list[str]:
+    raw = str(path_obj).replace("\\", "/")
+    return [part for part in raw.split("/") if part]
+
+
+def _any_name(path_obj) -> str:
+    parts = _split_any_path(path_obj)
+    return parts[-1] if parts else ""
+
+
+def _any_parent_name(path_obj) -> str:
+    parts = _split_any_path(path_obj)
+    return parts[-2] if len(parts) >= 2 else ""

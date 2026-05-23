@@ -22,3 +22,27 @@ Thumbs.db
 build/
 dist/
 *.spec
+# Generated ChapterFOLD EPUB regression fixtures
+/tests/fixtures/epubs/generated/
+
+# Local Python environments
+ChapterFOLD/
+.venv/
+venv/
+env/
+
+# Patch/script backups
+.patch_backups/
+*.bak_*
+*.bak
+*.backup
+
+# Python/cache/test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Generated EPUB regression fixtures
+tests/fixtures/epubs/generated/

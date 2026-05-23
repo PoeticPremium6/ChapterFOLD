@@ -23,7 +23,11 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QApplication,
 )
+
+from PySide6.QtGui import QAction
+from core.diagnostics import build_diagnostic_report
 
 from gui.worker import Worker
 
@@ -206,6 +210,7 @@ QSplitter::handle:vertical {
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
+        self._install_diagnostics_menu_action()
         self.setWindowTitle("ChapterFOLD")
         self.resize(1320, 980)
         self.setMinimumSize(1100, 780)
@@ -1005,3 +1010,54 @@ class MainWindow(QMainWindow):
             return
 
         os.startfile(str(path))
+
+    # ChapterFOLD Patch 002: diagnostics support
+    def _chapterfold_collect_current_settings_for_diagnostics(self):
+        """Best-effort settings capture for support reports.
+
+        This intentionally avoids document contents. It tries common attribute names
+        without assuming a specific UI implementation.
+        """
+        settings = {}
+        for name in (
+            "settings",
+            "current_settings",
+            "processing_settings",
+            "last_settings",
+        ):
+            if hasattr(self, name):
+                value = getattr(self, name)
+                try:
+                    settings[name] = dict(value) if isinstance(value, dict) else repr(value)
+                except Exception:
+                    settings[name] = "unavailable"
+        return settings
+
+    def _copy_diagnostic_report(self):
+        """Copy a privacy-conscious diagnostic report to the clipboard."""
+        report = build_diagnostic_report(
+            app_version=getattr(self, "APP_VERSION", "unknown"),
+            stage="manual GUI report",
+            settings=self._chapterfold_collect_current_settings_for_diagnostics(),
+        )
+        QApplication.clipboard().setText(report)
+        QMessageBox.information(self, "ChapterFOLD", "Diagnostic report copied to clipboard.")
+
+    def _install_diagnostics_menu_action(self):
+        """Add Help > Copy diagnostic report if a menu bar is available."""
+        try:
+            menu_bar = self.menuBar()
+            help_menu = None
+            for action in menu_bar.actions():
+                if action.text().replace("&", "").lower() == "help":
+                    help_menu = action.menu()
+                    break
+            if help_menu is None:
+                help_menu = menu_bar.addMenu("Help")
+            diagnostic_action = QAction("Copy diagnostic report", self)
+            diagnostic_action.triggered.connect(self._copy_diagnostic_report)
+            help_menu.addAction(diagnostic_action)
+        except Exception:
+            # Diagnostics must never prevent the app from starting.
+            pass
+

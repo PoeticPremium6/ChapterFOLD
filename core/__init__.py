@@ -1,1 +1,1 @@
-# scripts package marker
+"""Core ChapterFOLD processing package."""

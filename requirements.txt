@@ -6,3 +6,7 @@ pypdf
 pytest
 python-docx
 PySide6>=6.7
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+httpx>=0.27
