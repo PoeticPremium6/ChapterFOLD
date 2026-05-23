@@ -7,6 +7,7 @@ book-body HTML spine items from an EPUB inspection report.
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import re
 from typing import Any, Iterable
 
 SUBSTANTIAL_TEXT_CHARS = 1500
@@ -44,6 +45,18 @@ class GutenbergSelectionSummary:
             "selected_retention_ratio": self.selected_retention_ratio,
             "decisions": [decision.to_dict() for decision in self.decisions],
         }
+
+
+REAL_FRONT_MATTER_RE = re.compile(
+    r"\b(PREFACE|CONTENTS|LIST OF ILLUSTRATIONS|ILLUSTRATIONS|CHAPTER\s+I\.?|Chapter\s+I\.?)\b",
+    re.IGNORECASE,
+)
+
+
+def contains_real_front_matter_or_chapter_one(text: str) -> bool:
+    """Return True when a front Gutenberg-ish item also contains real book matter."""
+    return bool(REAL_FRONT_MATTER_RE.search(text or ""))
+
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -123,7 +136,17 @@ def _is_front_boilerplate_or_contents(item: dict[str, Any], position_in_spine: i
     has_start = _as_bool(item.get("has_gutenberg_start"))
     has_toc = _as_bool(item.get("has_toc_hint"))
     has_boilerplate = _as_bool(item.get("has_boilerplate_hint"))
-    combined = (_text(item, "first_text") + "\n" + _text(item, "last_text")).lower()
+    combined_text = _text(item, "first_text") + "\n" + _text(item, "last_text")
+    combined = combined_text.lower()
+
+    # Issue #17D:
+    # Some illustrated Gutenberg EPUBs put the Gutenberg header/title matter,
+    # Preface, List of Illustrations/Contents, and Chapter I in the same first
+    # spine file. Do not drop that file wholesale when it is substantial.
+    #
+    # Keep the old behaviour for tiny pure boilerplate/contents files.
+    if text_chars >= 10_000 and contains_real_front_matter_or_chapter_one(combined_text):
+        return False
 
     if has_start and (has_boilerplate or has_toc):
         return True

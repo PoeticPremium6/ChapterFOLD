@@ -1,4 +1,7 @@
 [tool.pytest.ini_options]
+markers = [
+    "local_gutenberg: tests requiring local Gutenberg EPUB fixtures",
+]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"

@@ -30,6 +30,7 @@ from PySide6.QtGui import QAction
 from core.diagnostics import build_diagnostic_report
 
 from gui.worker import Worker
+from chapterfold_app.gui.markdown_tools import install_markdown_render_action
 
 
 APP_STYLESHEET = """

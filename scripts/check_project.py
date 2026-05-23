@@ -28,6 +28,13 @@ REQUIRED_IMPORTS = [
     ("core.gutenberg_content_filter", "core.gutenberg_content_filter"),
     ("core.gutenberg_inline_trim", "core.gutenberg_inline_trim"),
     ("core.layout_heavy", "core.layout_heavy"),
+    ("core.markdown_book_renderer", "core.markdown_book_renderer"),
+    ("core.markdown_sections", "core.markdown_sections"),
+    ("core.toc_policy", "core.toc_policy"),
+    ("core.toc_rendering", "core.toc_rendering"),
+    ("core.toc_chapter_detection", "core.toc_chapter_detection"),
+    ("chapterfold_app.gui.markdown_tools", "chapterfold_app.gui.markdown_tools"),
+    ("chapterfold_app.gui.markdown_render_dialog", "chapterfold_app.gui.markdown_render_dialog"),
     ("weasyprint", "weasyprint"),
 ]
 

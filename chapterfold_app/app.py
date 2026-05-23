@@ -58,6 +58,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from PySide6.QtWidgets import QApplication
 from gui.main_window import MainWindow
+from chapterfold_app.gui.markdown_tools import install_markdown_render_ui
 
 
 def main() -> int:
@@ -65,6 +66,10 @@ def main() -> int:
     app.setApplicationName("ChapterFOLD")
     app.setOrganizationName("ChapterFOLD")
     window = MainWindow()
+    try:
+        install_markdown_render_ui(window)
+    except Exception as exc:
+        print(f"Markdown render UI integration skipped: {exc}")
     window.show()
     return app.exec()
 

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import html
+from core.special_layout import preserve_special_short_line_blocks
+import json
 import re
 import warnings
 from dataclasses import dataclass
@@ -18,6 +21,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from core.gutenberg_inline_trim import trim_gutenberg_boilerplate_from_sections
+from core.epub_toc_cleanup import strip_original_toc_blocks
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -62,6 +66,8 @@ class EpubContent:
     detected_title: str
     detected_author: str
     sections: List[Tuple[str, str]]
+    cover_image_data_uri: str = ""
+    cover_image_name: str = ""
 
 
 @dataclass
@@ -96,6 +102,11 @@ DIALOGUE_TAG_START_RE = re.compile(
 LOWER_CONTINUATION_RE = re.compile(r"^[a-z(\[\u2014\-']")
 TERMINAL_END_RE = re.compile(r"""[.!?]["\u201d\u2019']?$""")
 OPENING_QUOTE_RE = re.compile(r"""^["\u201c\u2018]""")
+
+CHAPTER_HEADING_TEXT_RE = re.compile(
+    r"^\s*(?:CHAPTER\s+(?:\d+|[IVXLCDM]+)\.?\s+.+|Epilogue)\s*$",
+    flags=re.IGNORECASE,
+)
 
 
 def cm(value: float) -> str:
@@ -258,6 +269,328 @@ def get_metadata(book: epub.EpubBook) -> Tuple[str, str]:
     return title, author
 
 
+def _extract_cover_image_data_uri(book: epub.EpubBook) -> tuple[str, str]:
+    """Return a data URI for the best available EPUB cover image.
+
+    This is intentionally conservative for v1: it prefers items marked as
+    cover-image, then image files with "cover" in the name, then the first
+    image resource.
+    """
+    image_items = []
+    for item in book.get_items():
+        media_type = str(getattr(item, "media_type", "") or "")
+        name = str(item.get_name() or "")
+        lower_name = name.lower()
+        if media_type.startswith("image/") or lower_name.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
+            image_items.append(item)
+
+    if not image_items:
+        return "", ""
+
+    def score(item) -> tuple[int, str]:
+        name = str(item.get_name() or "")
+        lower_name = name.lower()
+        props = set(getattr(item, "properties", []) or [])
+        if "cover-image" in props:
+            return (0, name)
+        if "cover" in lower_name:
+            return (1, name)
+        return (2, name)
+
+    best = sorted(image_items, key=score)[0]
+    media_type = str(getattr(best, "media_type", "") or "")
+    name = str(best.get_name() or "cover-image")
+    if not media_type.startswith("image/"):
+        suffix = Path(name).suffix.lower()
+        media_type = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+        }.get(suffix, "image/jpeg")
+
+    data = best.get_content()
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{media_type};base64,{encoded}", name
+
+
+
+
+IMAGE_MARKER_RE = re.compile(r"^\[\[CHAPTERFOLD_IMAGE:(?P<payload>[A-Za-z0-9_\-=]+)\]\]$")
+
+
+def _image_payload_encode(*, src: str, alt: str = "", name: str = "") -> str:
+    payload = {"src": src or "", "alt": alt or "", "name": name or ""}
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _image_payload_decode(marker: str) -> dict[str, str] | None:
+    match = IMAGE_MARKER_RE.match(marker.strip())
+    if not match:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(match.group("payload").encode("ascii"))
+        data = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {
+        "src": str(data.get("src") or ""),
+        "alt": str(data.get("alt") or ""),
+        "name": str(data.get("name") or ""),
+    }
+
+
+def _is_image_marker(value: str) -> bool:
+    return _image_payload_decode(value) is not None
+
+
+def _image_marker_to_html(value: str) -> str:
+    data = _image_payload_decode(value)
+    if not data or not data.get("src"):
+        return ""
+
+    src = html.escape(data["src"], quote=True)
+    alt = html.escape(data.get("alt") or "", quote=True)
+    caption = html.escape(data.get("alt") or "")
+    caption_html = f"<figcaption>{caption}</figcaption>" if caption else ""
+
+    return (
+        '<figure class="book-image">'
+        f'<img src="{src}" alt="{alt}" />'
+        f'{caption_html}'
+        '</figure>'
+    )
+
+
+def _build_image_data_uri_lookup(book: epub.EpubBook) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+
+    for item in book.get_items():
+        media_type = str(getattr(item, "media_type", "") or "")
+        name = str(item.get_name() or "")
+        lower_name = name.lower()
+
+        if not (
+            media_type.startswith("image/")
+            or lower_name.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"))
+        ):
+            continue
+
+        if not media_type.startswith("image/"):
+            suffix = Path(name).suffix.lower()
+            media_type = {
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+                ".svg": "image/svg+xml",
+            }.get(suffix, "image/jpeg")
+
+        data_uri = "data:{};base64,{}".format(
+            media_type,
+            base64.b64encode(item.get_content()).decode("ascii"),
+        )
+
+        for key in {
+            name,
+            name.replace("\\", "/"),
+            Path(name).name,
+            Path(name).as_posix(),
+        }:
+            if key:
+                lookup[key] = data_uri
+
+    return lookup
+
+
+def _resolve_epub_image_src(src: str, *, item_name: str, lookup: dict[str, str]) -> str:
+    src = (src or "").strip()
+    if not src:
+        return ""
+
+    src_no_anchor = src.split("#", 1)[0]
+    candidates = [
+        src,
+        src_no_anchor,
+        Path(src_no_anchor).name,
+        str((Path(item_name).parent / src_no_anchor).as_posix()).lstrip("./"),
+    ]
+
+    for candidate in candidates:
+        candidate = candidate.replace("\\", "/")
+        if candidate in lookup:
+            return lookup[candidate]
+
+    return ""
+
+
+def _replace_epub_images_with_markers(body, *, item_name: str, image_lookup: dict[str, str]) -> None:
+    """Replace EPUB img nodes with paragraph markers that survive text cleanup."""
+    for img in list(body.find_all("img")):
+        src = _resolve_epub_image_src(
+            str(img.get("src") or ""),
+            item_name=item_name,
+            lookup=image_lookup,
+        )
+        if not src:
+            img.decompose()
+            continue
+
+        alt = str(img.get("alt") or "").strip()
+        name = str(img.get("src") or "").strip()
+        marker = "[[CHAPTERFOLD_IMAGE:{}]]".format(
+            _image_payload_encode(src=src, alt=alt, name=name)
+        )
+
+        marker_soup = BeautifulSoup("", "html.parser")
+        new_p = marker_soup.new_tag("p")
+        new_p.string = marker
+        img.replace_with(new_p)
+
+
+
+
+COPYRIGHT_CAPTION_RE = re.compile(
+    r"""^\[?\s*copyright\s+\d{4}\s+by\s+.+?\]?\s*\.?$""",
+    re.IGNORECASE,
+)
+
+
+def _is_orphan_copyright_caption(value: str) -> bool:
+    return bool(COPYRIGHT_CAPTION_RE.match((value or "").strip()))
+
+
+def _clean_heading_candidate(value: str) -> str:
+    """Avoid using internal image markers/copyright notices as section headings."""
+    value = clean_text_block(value or "").strip()
+    if not value:
+        return ""
+    if _is_image_marker(value):
+        return ""
+    if "[[CHAPTERFOLD_IMAGE:" in value:
+        return ""
+    if _is_orphan_copyright_caption(value):
+        return ""
+    return value
+
+
+
+
+COPYRIGHT_CAPTION_RE = re.compile(
+    r"""^\[?\s*copyright\s+\d{4}\s+by\s+.+?\]?\s*\.?$""",
+    re.IGNORECASE,
+)
+
+IMAGE_MARKER_ANYWHERE_RE = re.compile(
+    r"\[\[CHAPTERFOLD_IMAGE:[A-Za-z0-9_\-=]+\]\]"
+)
+
+
+def _strip_internal_image_markers(value: str) -> str:
+    return IMAGE_MARKER_ANYWHERE_RE.sub("", value or "")
+
+
+def _normalize_caption_text(value: str) -> str:
+    value = html.unescape(value or "")
+    value = _strip_internal_image_markers(value)
+    value = re.sub(r"\[\s*copyright\s+\d{4}\s+by\s+.+?\]", "", value, flags=re.I)
+    value = value.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    value = re.sub(r"[^A-Za-z0-9]+", " ", value).strip().casefold()
+    return value
+
+
+def _is_orphan_copyright_caption(value: str) -> bool:
+    return bool(COPYRIGHT_CAPTION_RE.match((value or "").strip()))
+
+
+def _image_marker_alt(value: str) -> str:
+    data = _image_payload_decode(value)
+    if not data:
+        return ""
+    return str(data.get("alt") or "").strip()
+
+
+def _caption_matches_image_alt(caption: str, image_marker: str) -> bool:
+    caption_norm = _normalize_caption_text(caption)
+    alt_norm = _normalize_caption_text(_image_marker_alt(image_marker))
+    if not caption_norm or not alt_norm:
+        return False
+    return caption_norm == alt_norm or caption_norm in alt_norm or alt_norm in caption_norm
+
+
+def _is_probable_standalone_caption(value: str, image_marker: str = "") -> bool:
+    value = clean_text_block(value or "").strip()
+    if not value:
+        return False
+
+    if _is_orphan_copyright_caption(value):
+        return True
+
+    if image_marker and _caption_matches_image_alt(value, image_marker):
+        return True
+
+    if image_marker:
+        cleaned = re.sub(r"\[\s*copyright\s+\d{4}\s+by\s+.+?\]", "", value, flags=re.I).strip()
+        if len(cleaned) <= 90 and (
+            cleaned.startswith(("“", '"', "'"))
+            or cleaned.endswith(("”", '"', "'"))
+        ):
+            return True
+
+    return False
+
+
+def _clean_heading_candidate(value: str) -> str:
+    value = clean_text_block(value or "").strip()
+    if not value:
+        return ""
+
+    value = _strip_internal_image_markers(value).strip()
+    if not value:
+        return ""
+
+    if _is_orphan_copyright_caption(value):
+        return ""
+
+    if len(value) <= 90 and value.startswith(("“", '"', "'")):
+        return ""
+
+    return value
+
+
+def _collapse_image_adjacent_captions(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Remove duplicated caption/copyright paragraphs immediately after images."""
+    collapsed: list[tuple[str, str]] = []
+    i = 0
+
+    while i < len(items):
+        kind, value = items[i]
+
+        if kind != "image":
+            collapsed.append((kind, value))
+            i += 1
+            continue
+
+        collapsed.append((kind, value))
+        i += 1
+
+        while i < len(items):
+            next_kind, next_value = items[i]
+            if next_kind not in {"p", "heading"}:
+                break
+            if _is_probable_standalone_caption(next_value, value):
+                i += 1
+                continue
+            break
+
+    return collapsed
+
+
 def _spine_positions_by_href(book: epub.EpubBook) -> dict[str, int]:
     positions: dict[str, int] = {}
     for pos, entry in enumerate(getattr(book, "spine", []) or [], start=1):
@@ -275,6 +608,8 @@ def _spine_positions_by_href(book: epub.EpubBook) -> dict[str, int]:
 def load_epub_content(epub_path: Path) -> EpubContent:
     book = epub.read_epub(str(epub_path))
     title, author = get_metadata(book)
+    cover_image_data_uri, cover_image_name = _extract_cover_image_data_uri(book)
+    image_data_uri_lookup = _build_image_data_uri_lookup(book)
 
     from core.gutenberg_content_filter import (
         apply_gutenberg_filter_to_records,
@@ -291,10 +626,17 @@ def load_epub_content(epub_path: Path) -> EpubContent:
             bad.decompose()
 
         body = soup.find("body") or soup
+        href = str(getattr(item, "file_name", "") or item.get_name() or f"item-{index}")
+
+        _replace_epub_images_with_markers(
+            body,
+            item_name=href,
+            image_lookup=image_data_uri_lookup,
+        )
 
         heading = ""
         for tag in body.find_all(["h1", "h2", "h3"]):
-            txt = tag.get_text(" ", strip=True)
+            txt = _clean_heading_candidate(tag.get_text(" ", strip=True))
             if txt:
                 heading = txt
                 break
@@ -303,7 +645,6 @@ def load_epub_content(epub_path: Path) -> EpubContent:
         if not body_html:
             continue
 
-        href = str(getattr(item, "file_name", "") or f"item-{index}")
         record = build_epub_html_record(
             index=index,
             href=href,
@@ -325,6 +666,8 @@ def load_epub_content(epub_path: Path) -> EpubContent:
         detected_title=title,
         detected_author=author,
         sections=sections,
+        cover_image_data_uri=cover_image_data_uri,
+        cover_image_name=cover_image_name,
     )
     # Attached dynamically to avoid a broad dataclass/API rewrite.
     content.gutenberg_report = gutenberg_report
@@ -350,12 +693,13 @@ def _drop_unwanted_nodes(soup: BeautifulSoup, *, drop_notes: bool) -> None:
 
 
 def _raw_paragraph_items_from_fragment(fragment: str, *, drop_notes: bool = False) -> list[tuple[str, str]]:
+    fragment = strip_original_toc_blocks(fragment)
     soup = BeautifulSoup(fragment, "html.parser")
     _drop_unwanted_nodes(soup, drop_notes=drop_notes)
     body = soup.find("body") or soup
 
     items: list[tuple[str, str]] = []
-    block_tags = {"p", "blockquote", "div", "li"}
+    block_tags = {"p", "blockquote", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6"}
     scene_tags = {"hr"}
 
     for node in body.descendants:
@@ -376,8 +720,12 @@ def _raw_paragraph_items_from_fragment(fragment: str, *, drop_notes: bool = Fals
         cleaned = clean_text_block(text)
         if cleaned.strip():
             for chunk in [part.strip() for part in cleaned.split("\n\n") if part.strip()]:
-                if is_scene_break(chunk):
+                if _is_image_marker(chunk):
+                    items.append(("image", chunk))
+                elif is_scene_break(chunk):
                     items.append(("scene", "***"))
+                elif node.name in {"h1", "h2", "h3", "h4", "h5", "h6"} or CHAPTER_HEADING_TEXT_RE.match(chunk):
+                    items.append(("heading", chunk))
                 else:
                     items.append(("p", chunk))
 
@@ -470,9 +818,26 @@ def extract_clean_items_from_html(
             continue
 
         cleaned = clean_text_block(text, cleanup_settings)
-        if cleaned.strip():
-            normalized.append(("p", cleaned.strip()))
+        if not cleaned.strip():
+            continue
 
+        cleaned_value = cleaned.strip()
+
+        if _is_orphan_copyright_caption(cleaned_value):
+            continue
+
+        if kind == "image" or _is_image_marker(cleaned_value):
+            normalized.append(("image", cleaned_value))
+        elif kind == "heading" or CHAPTER_HEADING_TEXT_RE.match(cleaned_value):
+            heading_value = _clean_heading_candidate(cleaned_value)
+            if heading_value:
+                normalized.append(("heading", heading_value))
+        else:
+            cleaned_value = _strip_internal_image_markers(cleaned_value).strip()
+            if cleaned_value and not _is_orphan_copyright_caption(cleaned_value):
+                normalized.append(("p", cleaned_value))
+
+    normalized = _collapse_image_adjacent_captions(normalized)
     return merge_adjacent_paragraph_items(normalized, cleanup_settings)
 
 
@@ -490,10 +855,26 @@ def sanitize_section_html(
 
     html_parts: list[str] = []
     for kind, text in items:
+        value = text.strip()
+
+        if not value or _is_orphan_copyright_caption(value):
+            continue
+
         if kind == "scene":
             html_parts.append('<hr class="scene-break" />')
+        elif kind == "image":
+            image_html = _image_marker_to_html(value)
+            if image_html:
+                html_parts.append(image_html)
         else:
-            html_parts.append(f"<p>{html.escape(text)}</p>")
+            image_html = _image_marker_to_html(value)
+            if image_html:
+                html_parts.append(image_html)
+            else:
+                value = _strip_internal_image_markers(value).strip()
+                if value and not _is_orphan_copyright_caption(value):
+                    html_parts.append(f"<p>{html.escape(value)}</p>")
+
     return "\n".join(html_parts)
 
 
@@ -511,12 +892,29 @@ def extract_clean_text_from_html(
 
     parts: list[str] = []
     for kind, text in items:
+        value = text.strip()
+        if not value or _is_orphan_copyright_caption(value):
+            continue
+
         if kind == "scene":
             parts.append("***")
+        elif kind == "image":
+            # Rich Markdown image export can be added later; never leak markers.
+            continue
         else:
-            parts.append(text)
+            value = _strip_internal_image_markers(value).strip()
+            if value and not _is_orphan_copyright_caption(value):
+                parts.append(value)
+
     return "\n\n".join(parts).strip()
 
+
+
+
+
+def strip_internal_image_markers_for_counting(value: str) -> str:
+    """Remove ChapterFOLD image markers before text-retention estimates."""
+    return re.sub(r"\[\[CHAPTERFOLD_IMAGE:[A-Za-z0-9_\-=]+\]\]", "", value or "")
 
 
 def estimate_sections_text_chars(sections: List[Tuple[str, str]]) -> int:
@@ -524,7 +922,8 @@ def estimate_sections_text_chars(sections: List[Tuple[str, str]]) -> int:
 
     total = 0
     for _, raw_html in sections:
-        soup = BeautifulSoup(raw_html or "", "html.parser")
+        raw_html = strip_internal_image_markers_for_counting(raw_html or "")
+        soup = BeautifulSoup(raw_html, "html.parser")
         for bad in soup(["script", "style"]):
             bad.decompose()
         total += len(soup.get_text("\n", strip=True))
@@ -534,7 +933,7 @@ def estimate_sections_text_chars(sections: List[Tuple[str, str]]) -> int:
 def estimate_cleaned_text_chars(sections: List[Tuple[str, str]]) -> int:
     """Count characters in cleaned text sections."""
 
-    return sum(len(text or "") for _, text in sections)
+    return sum(len(strip_internal_image_markers_for_counting(text or "")) for _, text in sections)
 
 
 def build_cleanup_retention_report(
@@ -563,6 +962,15 @@ def build_cleanup_retention_report(
             selector_chars = 0
 
     denominator = selector_chars or raw_chars
+
+    # Image-preserving EPUBs can inflate selector_selected_text_chars because
+    # internal image markers may contain base64 data URIs. If selector chars are
+    # wildly larger than text extracted from the same selected sections, use the
+    # text-only raw count for retention decisions.
+    selector_image_inflated = bool(selector_chars and raw_chars and selector_chars > raw_chars * 5)
+    if selector_image_inflated:
+        denominator = raw_chars
+
     ratio = (cleaned_chars / denominator) if denominator else 0.0
 
     risk_flags: list[str] = []
@@ -582,6 +990,8 @@ def build_cleanup_retention_report(
     return {
         "raw_section_text_chars": raw_chars,
         "selector_selected_text_chars": selector_chars,
+        "selector_image_inflated": selector_image_inflated,
+        "retention_denominator_chars": denominator,
         "cleaned_text_chars": cleaned_chars,
         "cleanup_retention_ratio": round(ratio, 4),
         "gutenberg_detected": gutenberg_detected,
@@ -772,6 +1182,14 @@ p {
   widows: 2;
 }
 
+.chapter p {
+  text-indent: 1.2em;
+}
+
+.chapter p.scene-break {
+  text-indent: 0;
+}
+
 .chapter p + p {
   text-indent: 1.2em;
   margin-top: 0;
@@ -785,6 +1203,14 @@ p {
   text-indent: 0;
   orphans: 2;
   widows: 2;
+}
+
+.chapter p {
+  text-indent: 1.2em;
+}
+
+.chapter p.scene-break {
+  text-indent: 0;
 }
 
 .chapter p + p {
@@ -824,6 +1250,21 @@ body {{
   font-family: {settings.font_family};
   line-height: {settings.line_height};
   -weasy-bookmark-level: none;
+}}
+
+.cover-page {{
+  break-after: page;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}}
+
+.cover-page img {{
+  max-width: 90%;
+  max-height: 90vh;
+  object-fit: contain;
 }}
 
 .title-page {{
@@ -889,6 +1330,75 @@ hr, .scene-break {{
   border: 0;
   border-top: 1px solid #666;
 }}
+
+
+.generated-contents {{
+  break-after: page;
+  page-break-after: always;
+  margin: 0 auto 2em auto;
+}}
+
+.generated-contents h2 {{
+  text-align: center;
+  font-size: 1.35em;
+  margin: 0 0 1.2em 0;
+  text-indent: 0;
+}}
+
+.generated-contents ol {{
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}}
+
+.generated-contents li {{
+  margin: 0.35em 0;
+  padding: 0;
+  text-indent: 0;
+}}
+
+.generated-contents a {{
+  color: inherit;
+  text-decoration: none;
+}}
+
+.generated-contents a::after {{
+  content: leader(".") target-counter(attr(href), page);
+}}
+
+.toc-anchor {{
+  display: block;
+  height: 0;
+  overflow: hidden;
+}}
+
+
+.book-image {{
+  break-inside: avoid;
+  page-break-inside: avoid;
+  text-align: center;
+  margin: 1.4em auto;
+  text-indent: 0;
+}}
+
+.book-image img {{
+  display: block;
+  max-width: 88%;
+  max-height: 72vh;
+  object-fit: contain;
+  margin: 0 auto;
+}}
+
+.book-image figcaption {{
+  font-size: 0.85em;
+  line-height: 1.2;
+  text-align: center;
+  margin-top: 0.4em;
+  text-indent: 0;
+}}
+
+
+
 """
 
 
@@ -899,8 +1409,18 @@ def build_html_document(
     sections: List[Tuple[str, str]],
     settings: LayoutSettings,
     cleanup_settings: CleanupSettings | None = None,
+    cover_image_data_uri: str = "",
 ) -> str:
+    cover_block = ""
+    if cover_image_data_uri:
+        cover_block = f"""
+<section class="cover-page">
+  <img src="{cover_image_data_uri}" alt="{html.escape(title)} cover" />
+</section>
+"""
+
     blocks = [
+        cover_block,
         f"""
 <section class="title-page">
   <div class="title-wrap">
@@ -1017,26 +1537,34 @@ def _configure_docx_section(section, settings: LayoutSettings) -> None:
 
 
 def _apply_docx_paragraph_format(paragraph, settings: LayoutSettings, *, is_first_in_block: bool) -> None:
+    """Apply body paragraph formatting for DOCX export.
+
+    Issue #18:
+    In indented modes, normal body paragraphs should indent consistently,
+    including the first paragraph after a chapter/story heading.
+    """
     fmt = paragraph.paragraph_format
     mode = (settings.paragraph_spacing_mode or "traditional").strip().lower()
 
-    fmt.line_spacing = settings.line_height
-    fmt.space_before = Pt(0)
-
     if mode == "uniform":
+        fmt.space_before = Pt(0)
         fmt.space_after = Pt(0)
         fmt.first_line_indent = Pt(0)
     elif mode == "no-indents":
+        fmt.space_before = Pt(0)
         fmt.space_after = Pt(settings.font_size_pt * 0.65)
         fmt.first_line_indent = Pt(0)
     elif mode == "indented-compact":
+        fmt.space_before = Pt(0)
         fmt.space_after = Pt(0)
-        fmt.first_line_indent = Pt(0 if is_first_in_block else settings.font_size_pt * 1.2)
+        fmt.first_line_indent = Pt(settings.font_size_pt * 1.2)
     else:
+        fmt.space_before = Pt(0)
         fmt.space_after = Pt(settings.font_size_pt * 0.65)
-        fmt.first_line_indent = Pt(0 if is_first_in_block else settings.font_size_pt * 1.2)
+        fmt.first_line_indent = Pt(settings.font_size_pt * 1.2)
 
     paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
 
 def export_clean_docx(
     *,
@@ -1161,6 +1689,69 @@ def export_clean_markdown(
     return output_path
 
 
+
+def export_epub_image_assets(epub_path: str | Path, output_dir: str | Path, *, book_slug: str = "book") -> list[str]:
+    """Export EPUB image resources beside generated outputs.
+
+    This is intentionally non-invasive: it does not yet alter body flow,
+    but it preserves all image resources for later Markdown/DOCX/PDF use.
+    """
+    epub_path = Path(epub_path)
+    output_dir = Path(output_dir)
+    assets_dir = output_dir / f"{book_slug}-assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    book = epub.read_epub(str(epub_path))
+    exported: list[str] = []
+    manifest: list[dict[str, str | int]] = []
+
+    used_names: set[str] = set()
+
+    for item in book.get_items():
+        media_type = str(getattr(item, "media_type", "") or "")
+        name = str(item.get_name() or "")
+        lower_name = name.lower()
+
+        if not (
+            media_type.startswith("image/")
+            or lower_name.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"))
+        ):
+            continue
+
+        base = Path(name).name or "image"
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("_") or "image"
+
+        if safe in used_names:
+            stem = Path(safe).stem
+            suffix = Path(safe).suffix
+            n = 2
+            while f"{stem}_{n}{suffix}" in used_names:
+                n += 1
+            safe = f"{stem}_{n}{suffix}"
+
+        used_names.add(safe)
+        out_path = assets_dir / safe
+        data = item.get_content()
+        out_path.write_bytes(data)
+
+        exported.append(str(out_path))
+        manifest.append(
+            {
+                "source_name": name,
+                "output_file": str(out_path),
+                "media_type": media_type,
+                "size_bytes": len(data),
+            }
+        )
+
+    if manifest:
+        manifest_path = assets_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        exported.append(str(manifest_path))
+
+    return exported
+
+
 def process_epub_to_pdf(
     *,
     epub_path: str | Path,
@@ -1193,6 +1784,7 @@ def process_epub_to_pdf(
         sections=epub_content.sections,
         settings=settings,
         cleanup_settings=cleanup_settings,
+        cover_image_data_uri=getattr(epub_content, "cover_image_data_uri", ""),
     )
 
     book_slug = build_book_slug(
@@ -1200,6 +1792,13 @@ def process_epub_to_pdf(
         author=used_author,
         fallback_stem=epub_path.stem,
     )
+
+    image_asset_files: list[str] = []
+    try:
+        output_asset_dir = Path(output_pdf_path).parent if output_pdf_path is not None else epub_path.parent
+        image_asset_files = export_epub_image_assets(epub_path, output_asset_dir, book_slug=book_slug)
+    except Exception:
+        image_asset_files = []
 
     output_pdf = (
         Path(output_pdf_path)
