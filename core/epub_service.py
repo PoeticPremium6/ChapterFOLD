@@ -257,12 +257,33 @@ def get_metadata(book: epub.EpubBook) -> Tuple[str, str]:
     return title, author
 
 
+def _spine_positions_by_href(book: epub.EpubBook) -> dict[str, int]:
+    positions: dict[str, int] = {}
+    for pos, entry in enumerate(getattr(book, "spine", []) or [], start=1):
+        idref = entry[0] if isinstance(entry, (tuple, list)) and entry else entry
+        try:
+            item = book.get_item_with_id(idref)
+        except Exception:
+            item = None
+        href = getattr(item, "file_name", None) if item is not None else None
+        if href:
+            positions[str(href)] = pos
+    return positions
+
+
 def load_epub_content(epub_path: Path) -> EpubContent:
     book = epub.read_epub(str(epub_path))
     title, author = get_metadata(book)
-    sections: List[Tuple[str, str]] = []
 
-    for item in book.get_items_of_type(ITEM_DOCUMENT):
+    from core.gutenberg_content_filter import (
+        apply_gutenberg_filter_to_records,
+        build_epub_html_record,
+    )
+
+    spine_positions = _spine_positions_by_href(book)
+    records: list[dict] = []
+
+    for index, item in enumerate(book.get_items_of_type(ITEM_DOCUMENT)):
         raw = item.get_content()
         soup = BeautifulSoup(raw, "xml")
         for bad in soup(["script", "style"]):
@@ -278,15 +299,34 @@ def load_epub_content(epub_path: Path) -> EpubContent:
                 break
 
         body_html = "".join(str(x) for x in body.contents).strip()
-        if body_html:
-            sections.append((heading, body_html))
+        if not body_html:
+            continue
 
-    return EpubContent(
+        href = str(getattr(item, "file_name", "") or f"item-{index}")
+        record = build_epub_html_record(
+            index=index,
+            href=href,
+            spine_position=spine_positions.get(href, index + 1),
+            heading=heading,
+            body_html=body_html,
+        )
+        records.append(record)
+
+    selected_records, gutenberg_report = apply_gutenberg_filter_to_records(records)
+    sections: List[Tuple[str, str]] = [
+        (str(record.get("heading", "")), str(record.get("body_html", "")))
+        for record in selected_records
+        if str(record.get("body_html", "")).strip()
+    ]
+
+    content = EpubContent(
         detected_title=title,
         detected_author=author,
         sections=sections,
     )
-
+    # Attached dynamically to avoid a broad dataclass/API rewrite.
+    content.gutenberg_report = gutenberg_report
+    return content
 
 def _selectors_to_drop(drop_notes: bool) -> list[str]:
     selectors = [".landmark", ".actions", ".download", "nav"]
@@ -308,7 +348,7 @@ def _drop_unwanted_nodes(soup: BeautifulSoup, *, drop_notes: bool) -> None:
 
 
 def _raw_paragraph_items_from_fragment(fragment: str, *, drop_notes: bool = False) -> list[tuple[str, str]]:
-    soup = BeautifulSoup(fragment, "xml")
+    soup = BeautifulSoup(fragment, "html.parser")
     _drop_unwanted_nodes(soup, drop_notes=drop_notes)
     body = soup.find("body") or soup
 
@@ -475,6 +515,143 @@ def extract_clean_text_from_html(
             parts.append(text)
     return "\n\n".join(parts).strip()
 
+
+
+def estimate_sections_text_chars(sections: List[Tuple[str, str]]) -> int:
+    """Estimate readable text characters in raw section HTML fragments."""
+
+    total = 0
+    for _, raw_html in sections:
+        soup = BeautifulSoup(raw_html or "", "html.parser")
+        for bad in soup(["script", "style"]):
+            bad.decompose()
+        total += len(soup.get_text("\n", strip=True))
+    return total
+
+
+def estimate_cleaned_text_chars(sections: List[Tuple[str, str]]) -> int:
+    """Count characters in cleaned text sections."""
+
+    return sum(len(text or "") for _, text in sections)
+
+
+def build_cleanup_retention_report(
+    *,
+    sections: List[Tuple[str, str]],
+    cleaned_sections: List[Tuple[str, str]],
+    gutenberg_report: dict | None = None,
+) -> dict:
+    """Build a stage-level cleanup retention report.
+
+    For Gutenberg EPUBs, prefer the selector's selected_text_chars as the
+    denominator because it describes the body content intentionally kept after
+    notice/license filtering.
+    """
+
+    raw_chars = estimate_sections_text_chars(sections)
+    cleaned_chars = estimate_cleaned_text_chars(cleaned_sections)
+
+    selector_chars = 0
+    gutenberg_detected = False
+    if isinstance(gutenberg_report, dict):
+        gutenberg_detected = bool(gutenberg_report.get("gutenberg_detected"))
+        try:
+            selector_chars = int(gutenberg_report.get("selected_text_chars") or 0)
+        except (TypeError, ValueError):
+            selector_chars = 0
+
+    denominator = selector_chars or raw_chars
+    ratio = (cleaned_chars / denominator) if denominator else 0.0
+
+    risk_flags: list[str] = []
+    warnings: list[str] = []
+    failed = False
+
+    if denominator >= 50_000 and cleaned_chars < 10_000:
+        risk_flags.append("cleaned_text_very_short")
+    if denominator >= 50_000 and ratio < 0.20:
+        risk_flags.append("cleanup_retention_below_20_percent")
+    if gutenberg_detected and denominator >= 50_000 and ratio < 0.20:
+        failed = True
+        warnings.append(
+            "Gutenberg cleanup removed most selected body text; conservative fallback was attempted."
+        )
+
+    return {
+        "raw_section_text_chars": raw_chars,
+        "selector_selected_text_chars": selector_chars,
+        "cleaned_text_chars": cleaned_chars,
+        "cleanup_retention_ratio": round(ratio, 4),
+        "gutenberg_detected": gutenberg_detected,
+        "risk_flags": risk_flags,
+        "warnings": warnings,
+        "failed": failed,
+    }
+
+
+def build_clean_text_sections_with_retention_guard(
+    sections: List[Tuple[str, str]],
+    *,
+    drop_notes: bool,
+    cleanup_settings: CleanupSettings | None = None,
+    gutenberg_report: dict | None = None,
+) -> tuple[List[Tuple[str, str]], dict]:
+    """Clean sections and guard against catastrophic text loss.
+
+    If a Gutenberg book loses most of its selected body during cleanup, retry
+    with a conservative cleanup configuration. If the conservative pass still
+    loses most text, raise an error instead of silently producing a tiny book.
+    """
+
+    cleanup_settings = cleanup_settings or CleanupSettings()
+    cleaned = build_clean_text_sections(
+        sections,
+        drop_notes=drop_notes,
+        cleanup_settings=cleanup_settings,
+    )
+    report = build_cleanup_retention_report(
+        sections=sections,
+        cleaned_sections=cleaned,
+        gutenberg_report=gutenberg_report,
+    )
+
+    if report.get("failed"):
+        conservative = CleanupSettings(
+            join_soft_wrapped_lines=False,
+            join_dialogue_continuations=False,
+            merge_dialogue_paragraphs=False,
+            aggressive_mode=False,
+            collapse_extra_blank_lines=True,
+            preserve_scene_breaks=True,
+        )
+        fallback = build_clean_text_sections(
+            sections,
+            drop_notes=drop_notes,
+            cleanup_settings=conservative,
+        )
+        fallback_report = build_cleanup_retention_report(
+            sections=sections,
+            cleaned_sections=fallback,
+            gutenberg_report=gutenberg_report,
+        )
+        fallback_report["fallback_attempted"] = True
+        fallback_report["fallback_reason"] = "initial_cleanup_retention_too_low"
+
+        if not fallback_report.get("failed"):
+            fallback_report.setdefault("warnings", []).append(
+                "Used conservative Gutenberg cleanup fallback because standard cleanup retained too little text."
+            )
+            return fallback, fallback_report
+
+        raise ValueError(
+            "Cleanup retained too little Gutenberg body text "
+            f"({fallback_report.get('cleaned_text_chars')} chars from "
+            f"{fallback_report.get('selector_selected_text_chars') or fallback_report.get('raw_section_text_chars')} chars). "
+            "Aborting instead of producing an incomplete book."
+        )
+
+    report["fallback_attempted"] = False
+    return cleaned, report
 
 def build_clean_text_sections(
     sections: List[Tuple[str, str]],
@@ -1034,13 +1211,12 @@ def process_epub_to_pdf(
 
     render_pdf(html_doc, output_pdf)
 
-    clean_text_sections: List[Tuple[str, str]] | None = None
-    if export_docx or export_markdown:
-        clean_text_sections = build_clean_text_sections(
-            epub_content.sections,
-            drop_notes=settings.drop_notes,
-            cleanup_settings=cleanup_settings,
-        )
+    clean_text_sections, cleanup_retention_report = build_clean_text_sections_with_retention_guard(
+        epub_content.sections,
+        drop_notes=settings.drop_notes,
+        cleanup_settings=cleanup_settings,
+        gutenberg_report=getattr(epub_content, "gutenberg_report", None),
+    )
 
     output_docx: Path | None = None
     if export_docx:
@@ -1071,7 +1247,7 @@ def process_epub_to_pdf(
             output_path=output_markdown,
         )
 
-    return EpubToPdfResult(
+    result = EpubToPdfResult(
         input_epub=epub_path,
         output_dir=output_pdf.parent,
         output_pdf=output_pdf,
@@ -1083,3 +1259,7 @@ def process_epub_to_pdf(
         used_title=used_title,
         used_author=used_author,
     )
+    # Attached dynamically to avoid a broad public dataclass/API change.
+    result.gutenberg_report = getattr(epub_content, "gutenberg_report", None)
+    result.cleanup_retention_report = cleanup_retention_report
+    return result

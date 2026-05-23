@@ -46,3 +46,58 @@ htmlcov/
 
 # Generated EPUB regression fixtures
 tests/fixtures/epubs/generated/
+# ---------------------------------------------------------------------------
+# ChapterFOLD local development hygiene
+# ---------------------------------------------------------------------------
+
+# Local Python environments - do not commit dependencies/site-packages.
+ChapterFOLD/
+.venv/
+venv/
+env/
+ENV/
+
+# Patch/script backups.
+.patch_backups/
+patch_notes/
+*.bak
+*.bak_*
+*.backup
+*.orig
+
+# Python/cache/test artifacts.
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.cache/
+
+# Build/release outputs.
+build/
+dist/
+*.egg-info/
+*.spec.bak
+
+# Local app/runtime outputs.
+outputs/
+output/
+tmp/
+temp/
+
+# Generated EPUB regression fixtures.
+tests/fixtures/epubs/generated/
+tests/fixtures/epubs/*.epub
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+# Local full-book Gutenberg fixtures and generated reports
+tests/fixtures/gutenberg/raw/
+reports/

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -15,6 +16,7 @@ from core.epub_service import (
     process_epub_to_pdf,
 )
 from core.impose_service import build_signature_settings, impose_pdf
+from core.gutenberg_content_filter import retention_summary_line
 
 LogCallback = Callable[[str], None]
 
@@ -375,6 +377,11 @@ def run_processing(
 
     log("Reading EPUB metadata...")
     epub_content = load_epub_content(input_epub)
+    gutenberg_report = getattr(epub_content, "gutenberg_report", None)
+    if gutenberg_report and gutenberg_report.get("gutenberg_detected"):
+        log(retention_summary_line(gutenberg_report))
+        for warning in gutenberg_report.get("warnings", []) or []:
+            log(f"Warning: {warning}")
 
     used_title = epub_content.detected_title
     used_author = epub_content.detected_author
@@ -389,6 +396,19 @@ def run_processing(
         margin_preset=margin_preset,
         page_size_preset=page_size_preset,
     )
+
+    conversion_report_path = ""
+    if gutenberg_report and gutenberg_report.get("gutenberg_detected"):
+        conversion_report = {
+            "input_epub": str(input_epub),
+            "title": used_title,
+            "author": used_author,
+            "gutenberg_report": gutenberg_report,
+        }
+        report_path = output_dir / f"{file_stem} - Conversion Report.json"
+        report_path.write_text(json.dumps(conversion_report, indent=2, ensure_ascii=False), encoding="utf-8")
+        conversion_report_path = str(report_path)
+        log(f"Wrote conversion report: {report_path.name}")
 
     log(f"Detected title: {used_title}")
     log(f"Detected author: {used_author}")
@@ -439,6 +459,27 @@ def run_processing(
         settings=layout_settings,
         cleanup_settings=cleanup_settings,
     )
+
+    cleanup_retention_report = getattr(result, "cleanup_retention_report", None)
+    if cleanup_retention_report:
+        log(
+            "Cleanup retention: "
+            f"{cleanup_retention_report.get('cleaned_text_chars', 0)} cleaned chars "
+            f"from {cleanup_retention_report.get('selector_selected_text_chars') or cleanup_retention_report.get('raw_section_text_chars') or 0} source chars "
+            f"({cleanup_retention_report.get('cleanup_retention_ratio', 0):.4f})"
+        )
+        for warning in cleanup_retention_report.get("warnings", []) or []:
+            log(f"Warning: {warning}")
+        report_path_value = locals().get("conversion_report_path", "")
+        if report_path_value:
+            try:
+                report_path = Path(report_path_value)
+                if report_path.exists():
+                    report_data = json.loads(report_path.read_text(encoding="utf-8"))
+                    report_data["cleanup_retention_report"] = cleanup_retention_report
+                    report_path.write_text(json.dumps(report_data, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception as exc:
+                log(f"Warning: could not update conversion report with cleanup retention data: {exc}")
 
     log("Calculating result stats...")
     input_size_mb = file_size_mb(input_epub)
@@ -543,4 +584,6 @@ def run_processing(
         "output_dir": str(result.output_dir),
         "export_docx": export_docx,
         "export_markdown": export_markdown,
+        "conversion_report": conversion_report_path,
+        "gutenberg_report": gutenberg_report or {},
     }

@@ -173,5 +173,29 @@ def main() -> int:
     return 0
 
 
+
+
+# Patch 009b fixture compatibility aliases
+def _write_compatibility_aliases() -> None:
+    """Create underscore-named aliases expected by older tests.
+
+    Patch 004 originally generated hyphenated fixture names. Some tests and
+    docs refer to underscore names, so keep both names available. These files
+    live under tests/fixtures/epubs/generated/ and are ignored by git.
+    """
+    aliases = {
+        "scene-breaks.epub": "scene_breaks.epub",
+        "dialogue-softwrap.epub": "dialogue_softwrap.epub",
+        "unicode-punctuation.epub": "unicode_punctuation.epub",
+    }
+    generated_dir = Path("tests/fixtures/epubs/generated")
+    for src_name, alias_name in aliases.items():
+        src = generated_dir / src_name
+        alias = generated_dir / alias_name
+        if src.exists():
+            alias.write_bytes(src.read_bytes())
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
+    _write_compatibility_aliases()
