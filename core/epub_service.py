@@ -1265,3 +1265,25 @@ def process_epub_to_pdf(
     result.gutenberg_report = getattr(epub_content, "gutenberg_report", None)
     result.cleanup_retention_report = cleanup_retention_report
     return result
+
+
+# --- ChapterFOLD layout-heavy cleanup integration START ---
+# Applied after the normal text cleanup pipeline. This keeps the integration
+# low-risk: normal extraction still runs first, then we remove accidental
+# control artifacts and compact repeated ASCII divider noise.
+try:
+    from core.layout_heavy import clean_layout_heavy_text
+
+    _chapterfold_original_build_clean_text_sections_layout_heavy = build_clean_text_sections
+
+    def build_clean_text_sections(*args, **kwargs):  # type: ignore[no-redef]
+        sections = _chapterfold_original_build_clean_text_sections_layout_heavy(*args, **kwargs)
+        cleaned_sections = []
+        for heading, text in sections:
+            cleaned_sections.append((heading, clean_layout_heavy_text(text)))
+        return cleaned_sections
+except Exception:
+    # Do not break imports if this module is loaded in a partial/dev context.
+    pass
+# --- ChapterFOLD layout-heavy cleanup integration END ---
+
