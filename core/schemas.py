@@ -26,6 +26,7 @@ class ChapterfoldSettings:
     export_markdown: bool = False
     generate_clean_pdf: bool = True
     paragraph_spacing_mode: str = "traditional"
+    contents_mode: str = "rebuild"
 
     page_size_preset: str = "default-trade"
     custom_trim_width_cm: Optional[float] = None
@@ -56,6 +57,10 @@ class ChapterfoldSettings:
         allowed_variants = {"standard", "aggressive-cleanup", "paragraph-dialogue-merge"}
         if self.variant not in allowed_variants:
             raise ValueError(f"Unknown variant: {self.variant}")
+
+        allowed_contents_modes = {"keep", "remove", "rebuild", "rebuild-paged"}
+        if self.contents_mode not in allowed_contents_modes:
+            raise ValueError(f"Unknown contents_mode: {self.contents_mode}")
 
         if self.signature_size <= 0:
             raise ValueError("signature_size must be positive.")

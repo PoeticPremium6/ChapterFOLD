@@ -8,6 +8,7 @@ from typing import Callable
 
 from pypdf import PdfReader
 
+from core.font_catalog import get_font_choice
 from core.epub_service import (
     CleanupSettings,
     EpubToPdfResult,
@@ -16,6 +17,13 @@ from core.epub_service import (
     process_epub_to_pdf,
 )
 from core.impose_service import build_signature_settings, impose_pdf
+from core.signature_exports import (
+    calculate_signature_groups,
+    write_signature_docx,
+    write_signature_markdown,
+    write_signature_plan_json,
+    write_signature_plan_markdown,
+)
 from core.gutenberg_content_filter import retention_summary_line
 
 LogCallback = Callable[[str], None]
@@ -145,10 +153,16 @@ def build_layout_settings(
     custom_margin_bottom_cm: float | None,
     custom_margin_inside_cm: float | None,
     custom_margin_outside_cm: float | None,
+    output_font_key: str = "classic-serif",
+    contents_mode: str = "rebuild",
 ) -> LayoutSettings:
     layout = LayoutSettings(
         paragraph_spacing_mode=paragraph_spacing_mode,
     )
+
+    font_choice = get_font_choice(output_font_key)
+    layout.font_family = font_choice.css_stack
+    layout.contents_mode = contents_mode
 
     size_key = (page_size_preset or "default-trade").strip().lower()
     if size_key == "custom":
@@ -345,6 +359,8 @@ def run_processing(
     custom_margin_bottom_cm: float | None,
     custom_margin_inside_cm: float | None,
     custom_margin_outside_cm: float | None,
+    output_font_key: str = "classic-serif",
+    contents_mode: str = "rebuild",
     imposition_mode: str,
     imposed_pages_per_signature: int,
     binding_direction: str,
@@ -371,6 +387,8 @@ def run_processing(
         custom_margin_bottom_cm=custom_margin_bottom_cm,
         custom_margin_inside_cm=custom_margin_inside_cm,
         custom_margin_outside_cm=custom_margin_outside_cm,
+        output_font_key=output_font_key,
+        contents_mode=contents_mode,
     )
 
     create_imposed_pdf = (imposition_mode or "none").strip().lower() == "also"
@@ -414,6 +432,9 @@ def run_processing(
     log(f"Detected author: {used_author}")
     log(f"Selected variant: {describe_variant(variant)}")
     log(f"Paragraph spacing mode: {describe_spacing_mode(paragraph_spacing_mode)}")
+    font_choice = get_font_choice(output_font_key)
+    log(f"Output font: {font_choice.label}")
+    log(f"Contents mode: {contents_mode}")
     log(f"Page size: {describe_page_size_preset(page_size_preset)}")
     log(f"Trim size: {layout_settings.trim_width_cm:.2f} cm x {layout_settings.trim_height_cm:.2f} cm")
     log(f"Margin preset: {describe_margin_preset(margin_preset)}")
@@ -509,6 +530,10 @@ def run_processing(
     imposed_output_sheet_sides = None
     imposed_physical_sheets_total = None
     imposed_signature_settings_pages = None
+    signature_plan_json = ""
+    signature_plan_markdown = ""
+    signature_batches_markdown = ""
+    signature_batches_docx = ""
 
     if create_imposed_pdf:
         log("Creating imposed signature PDF...")
@@ -534,6 +559,41 @@ def run_processing(
         imposed_output_sheet_sides = impose_result.output_sheet_sides
         imposed_physical_sheets_total = impose_result.physical_sheets_total
 
+        signature_groups = calculate_signature_groups(
+            total_pages=output_pdf_pages,
+            pages_per_signature=signature_settings.pages_per_signature,
+        )
+
+        signature_plan_json = str(write_signature_plan_json(
+            output_path=output_dir / f"{file_stem} - Signature Plan.json",
+            total_pages=output_pdf_pages,
+            pages_per_signature=signature_settings.pages_per_signature,
+            groups=signature_groups,
+        ))
+        signature_plan_markdown = str(write_signature_plan_markdown(
+            output_path=output_dir / f"{file_stem} - Signature Plan.md",
+            title=used_title,
+            total_pages=output_pdf_pages,
+            pages_per_signature=signature_settings.pages_per_signature,
+            groups=signature_groups,
+        ))
+
+        if result.output_markdown:
+            signature_batches_markdown = str(write_signature_markdown(
+                source_markdown=result.output_markdown,
+                output_path=output_dir / f"{file_stem} - Signature Batches.md",
+                groups=signature_groups,
+            ))
+
+        if result.output_docx:
+            signature_batches_docx = str(write_signature_docx(
+                output_path=output_dir / f"{file_stem} - Signature Batches.docx",
+                title=used_title,
+                groups=signature_groups,
+            ))
+
+        log(f"Wrote signature plan: {Path(signature_plan_markdown).name}")
+
     return {
         "title": result.used_title,
         "author": result.used_author,
@@ -555,6 +615,9 @@ def run_processing(
         "size_delta_mb_vs_baseline": size_delta_mb,
         "paragraph_spacing_mode": paragraph_spacing_mode,
         "paragraph_spacing_mode_label": describe_spacing_mode(paragraph_spacing_mode),
+        "contents_mode": contents_mode,
+        "output_font_key": output_font_key,
+        "output_font_label": get_font_choice(output_font_key).label,
         "page_size_preset": page_size_preset,
         "page_size_preset_label": describe_page_size_preset(page_size_preset),
         "trim_width_cm": layout_settings.trim_width_cm,
@@ -578,6 +641,10 @@ def run_processing(
         "imposed_total_signatures": imposed_total_signatures,
         "imposed_output_sheet_sides": imposed_output_sheet_sides,
         "imposed_physical_sheets_total": imposed_physical_sheets_total,
+        "signature_plan_json": signature_plan_json,
+        "signature_plan_markdown": signature_plan_markdown,
+        "signature_batches_markdown": signature_batches_markdown,
+        "signature_batches_docx": signature_batches_docx,
         "output_pdf": str(result.output_pdf),
         "output_docx": str(result.output_docx) if result.output_docx else "",
         "output_markdown": str(result.output_markdown) if result.output_markdown else "",

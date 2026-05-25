@@ -43,6 +43,7 @@ def build_settings(args: argparse.Namespace) -> ChapterfoldSettings:
         "export_docx": True if args.export_docx else None,
         "export_markdown": True if args.export_markdown else None,
         "paragraph_spacing_mode": args.paragraph_spacing_mode,
+        "contents_mode": getattr(args, "contents_mode", None),
         "margin_preset": args.margin_preset,
         "page_size_preset": args.page_size_preset,
         "create_imposed_pdf": True if args.impose else None,
@@ -79,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-docx", action="store_true", help="Also export a DOCX file")
     parser.add_argument("--export-markdown", action="store_true", help="Also export a Markdown file")
     parser.add_argument("--paragraph-spacing-mode", choices=["traditional", "uniform", "no-indents", "indented-compact"], default=None)
+    parser.add_argument("--contents-mode", choices=["keep", "remove", "rebuild", "rebuild-paged"], default=None, help="How to handle source table of contents")
     parser.add_argument("--page-size-preset", choices=["default-trade", "a4", "a5", "a6", "letter", "half-letter", "trade-5x8", "trade-6x9", "custom"], default=None)
     parser.add_argument("--custom-trim-width-cm", type=float, default=None)
     parser.add_argument("--custom-trim-height-cm", type=float, default=None)

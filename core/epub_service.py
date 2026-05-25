@@ -21,7 +21,11 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from core.gutenberg_inline_trim import trim_gutenberg_boilerplate_from_sections
+from core.font_policy import UNICODE_PDF_FONT_STACK, apply_docx_unicode_font, apply_docx_run_unicode_fallback
+from core.contents_mode import should_generate_contents, should_strip_source_contents
 from core.epub_toc_cleanup import strip_original_toc_blocks
+from core.generated_toc import prepend_generated_toc_section
+from core.source_toc_harvest import harvest_source_toc_entries
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
@@ -33,7 +37,7 @@ except Exception as e:
 else:
     WEASYPRINT_IMPORT_ERROR = None
 
-DEFAULT_FONT_STACK = '"Garamond", "EB Garamond", "Cormorant Garamond", serif'
+DEFAULT_FONT_STACK = UNICODE_PDF_FONT_STACK
 
 
 @dataclass
@@ -49,6 +53,7 @@ class LayoutSettings:
     font_family: str = DEFAULT_FONT_STACK
     drop_notes: bool = False
     paragraph_spacing_mode: str = "traditional"
+    contents_mode: str = "rebuild"
 
 
 @dataclass
@@ -692,8 +697,14 @@ def _drop_unwanted_nodes(soup: BeautifulSoup, *, drop_notes: bool) -> None:
             el.decompose()
 
 
-def _raw_paragraph_items_from_fragment(fragment: str, *, drop_notes: bool = False) -> list[tuple[str, str]]:
-    fragment = strip_original_toc_blocks(fragment)
+def _raw_paragraph_items_from_fragment(
+    fragment: str,
+    *,
+    drop_notes: bool = False,
+    strip_source_contents: bool = True,
+) -> list[tuple[str, str]]:
+    if strip_source_contents:
+        fragment = strip_original_toc_blocks(fragment)
     soup = BeautifulSoup(fragment, "html.parser")
     _drop_unwanted_nodes(soup, drop_notes=drop_notes)
     body = soup.find("body") or soup
@@ -806,9 +817,14 @@ def extract_clean_items_from_html(
     *,
     drop_notes: bool = False,
     cleanup_settings: CleanupSettings | None = None,
+    strip_source_contents: bool = True,
 ) -> list[tuple[str, str]]:
     cleanup_settings = cleanup_settings or CleanupSettings()
-    raw_items = _raw_paragraph_items_from_fragment(fragment, drop_notes=drop_notes)
+    raw_items = _raw_paragraph_items_from_fragment(
+        fragment,
+        drop_notes=drop_notes,
+        strip_source_contents=strip_source_contents,
+    )
 
     normalized: list[tuple[str, str]] = []
     for kind, text in raw_items:
@@ -846,11 +862,13 @@ def sanitize_section_html(
     *,
     drop_notes: bool = False,
     cleanup_settings: CleanupSettings | None = None,
+    strip_source_contents: bool = True,
 ) -> str:
     items = extract_clean_items_from_html(
         fragment,
         drop_notes=drop_notes,
         cleanup_settings=cleanup_settings,
+        strip_source_contents=strip_source_contents,
     )
 
     html_parts: list[str] = []
@@ -883,11 +901,13 @@ def extract_clean_text_from_html(
     *,
     drop_notes: bool = False,
     cleanup_settings: CleanupSettings | None = None,
+    strip_source_contents: bool = True,
 ) -> str:
     items = extract_clean_items_from_html(
         fragment,
         drop_notes=drop_notes,
         cleanup_settings=cleanup_settings,
+        strip_source_contents=strip_source_contents,
     )
 
     parts: list[str] = []
@@ -1007,6 +1027,7 @@ def build_clean_text_sections_with_retention_guard(
     drop_notes: bool,
     cleanup_settings: CleanupSettings | None = None,
     gutenberg_report: dict | None = None,
+    contents_mode: str = "rebuild",
 ) -> tuple[List[Tuple[str, str]], dict]:
     """Clean sections and guard against catastrophic text loss.
 
@@ -1020,6 +1041,7 @@ def build_clean_text_sections_with_retention_guard(
         sections,
         drop_notes=drop_notes,
         cleanup_settings=cleanup_settings,
+        contents_mode=contents_mode,
     )
     report = build_cleanup_retention_report(
         sections=sections,
@@ -1064,6 +1086,29 @@ def build_clean_text_sections_with_retention_guard(
 
     report["fallback_attempted"] = False
     return cleaned, report
+
+
+def prepend_harvested_source_toc_entries(
+    cleaned_sections: list[tuple[str, str]],
+    raw_sections: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Add source TOC entries as a synthetic seed section for generated contents."""
+    entries: list[str] = []
+    seen: set[str] = set()
+
+    for _, raw_html in raw_sections:
+        for entry in harvest_source_toc_entries(raw_html):
+            key = entry.casefold()
+            if key not in seen:
+                seen.add(key)
+                entries.append(entry)
+
+    if not entries:
+        return cleaned_sections
+
+    seed_text = "\n".join(entries)
+    return [("__SOURCE_TOC_SEED__", seed_text)] + cleaned_sections
+
 
 def build_clean_text_sections(
     sections: List[Tuple[str, str]],
@@ -1817,6 +1862,7 @@ def process_epub_to_pdf(
         drop_notes=settings.drop_notes,
         cleanup_settings=cleanup_settings,
         gutenberg_report=getattr(epub_content, "gutenberg_report", None),
+        contents_mode=getattr(settings, "contents_mode", "rebuild"),
     )
 
     output_docx: Path | None = None
@@ -1876,10 +1922,18 @@ try:
     _chapterfold_original_build_clean_text_sections_layout_heavy = build_clean_text_sections
 
     def build_clean_text_sections(*args, **kwargs):  # type: ignore[no-redef]
+        contents_mode = kwargs.pop("contents_mode", "rebuild")
         sections = _chapterfold_original_build_clean_text_sections_layout_heavy(*args, **kwargs)
         cleaned_sections = []
         for heading, text in sections:
             cleaned_sections.append((heading, clean_layout_heavy_text(text)))
+        if should_generate_contents(contents_mode):
+            seeded_sections = prepend_harvested_source_toc_entries(
+                cleaned_sections,
+                list(args[0]) if args else [],
+            )
+            generated = prepend_generated_toc_section(seeded_sections)
+            return [section for section in generated if section[0] != "__SOURCE_TOC_SEED__"]
         return cleaned_sections
 except Exception:
     # Do not break imports if this module is loaded in a partial/dev context.

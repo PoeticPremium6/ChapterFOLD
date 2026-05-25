@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -8,10 +9,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox,
+    QCheckBox,
+    QComboBox,
     QDialog,
-    QFileDialog, QComboBox,
+    QFileDialog,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,17 +28,21 @@ from PySide6.QtWidgets import (
 
 
 class MarkdownRenderDialog(QDialog):
-    """Small GUI workflow for Issue #22: edit Markdown, then render it back.
+    """Render an edited ChapterFOLD Markdown file back into book outputs."""
 
-    The dialog deliberately calls scripts/render_markdown_book.py instead of
-    duplicating rendering code. This keeps the GUI path aligned with the tested
-    CLI path added in Patch 015.
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        initial_markdown_path: str | Path | None = None,
+        initial_output_dir: str | Path | None = None,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Render Edited Markdown")
-        self.resize(760, 520)
+        self.setWindowTitle("ChapterFOLD Markdown Studio")
+        self.resize(860, 620)
+
+        self.last_output_files: list[Path] = []
+        self.last_output_dir: Path | None = None
 
         self.markdown_path = QLineEdit()
         self.markdown_path.setPlaceholderText("Select a ChapterFOLD Editable.md file...")
@@ -42,76 +50,129 @@ class MarkdownRenderDialog(QDialog):
         self.output_dir = QLineEdit()
         self.output_dir.setPlaceholderText("Select an output folder...")
 
-        self.export_docx = QCheckBox, QComboBox("Also export DOCX")
+        self.title_override = QLineEdit()
+        self.title_override.setPlaceholderText("Optional; otherwise inferred from Markdown")
+
+        self.author_override = QLineEdit()
+        self.author_override.setPlaceholderText("Optional; otherwise inferred from Markdown")
+
+        self.toc_mode = QComboBox()
+        self.toc_mode.addItem("Keep existing TOC", "keep")
+        self.toc_mode.addItem("Remove existing TOC", "remove")
+        self.toc_mode.addItem("Rebuild TOC", "rebuild")
+        self.toc_mode.setCurrentIndex(0)
+
+        self.export_pdf = QCheckBox("Export PDF")
+        self.export_pdf.setChecked(True)
+
+        self.export_docx = QCheckBox("Export DOCX")
         self.export_docx.setChecked(False)
 
-        choose_md = QPushButton("Choose Markdown…")
-        choose_md.clicked.connect(self.choose_markdown)
+        self.copy_markdown = QCheckBox("Copy edited Markdown to output folder")
+        self.copy_markdown.setChecked(True)
 
-        open_md = QPushButton("Open for Editing")
-        open_md.clicked.connect(self.open_markdown)
+        self.choose_md_btn = QPushButton("Choose Markdown…")
+        self.choose_md_btn.clicked.connect(self.choose_markdown)
 
-        choose_out = QPushButton("Choose Output Folder…")
-        choose_out.clicked.connect(self.choose_output_dir)
+        self.open_md_btn = QPushButton("Open for Editing")
+        self.open_md_btn.clicked.connect(self.open_markdown)
 
-        render_btn = QPushButton("Render PDF")
-        render_btn.clicked.connect(self.render_markdown)
-        render_btn.setDefault(True)
+        self.choose_out_btn = QPushButton("Choose Output Folder…")
+        self.choose_out_btn.clicked.connect(self.choose_output_dir)
 
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
+        self.render_btn = QPushButton("Render Markdown")
+        self.render_btn.clicked.connect(self.render_markdown)
+        self.render_btn.setDefault(True)
+
+        self.open_output_btn = QPushButton("Open Output Folder")
+        self.open_output_btn.clicked.connect(self.open_output_folder)
+        self.open_output_btn.setEnabled(False)
+
+        self.open_pdf_btn = QPushButton("Open PDF")
+        self.open_pdf_btn.clicked.connect(self.open_latest_pdf)
+        self.open_pdf_btn.setEnabled(False)
+
+        self.open_docx_btn = QPushButton("Open DOCX")
+        self.open_docx_btn.clicked.connect(self.open_latest_docx)
+        self.open_docx_btn.setEnabled(False)
+
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.close)
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setPlaceholderText("Render output will appear here…")
+        self.log.setPlaceholderText("Markdown render log appears here…")
 
-        md_row = QHBoxLayout()
-        md_row.addWidget(self.markdown_path, 1)
-        md_row.addWidget(choose_md)
-        md_row.addWidget(open_md)
+        self._build_layout()
 
-        out_row = QHBoxLayout()
-        out_row.addWidget(self.output_dir, 1)
-        out_row.addWidget(choose_out)
+        if initial_markdown_path:
+            self.set_markdown_path(initial_markdown_path)
+        if initial_output_dir:
+            self.output_dir.setText(str(initial_output_dir))
 
-        form = QFormLayout()
-        form.addRow("Edited Markdown", md_row)
-        form.addRow("Output Folder", out_row)
-        form.addRow("Options", self.export_docx)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        buttons.addWidget(render_btn)
-        buttons.addWidget(close_btn)
-
+    def _build_layout(self) -> None:
         help_text = QLabel(
-            "Workflow: convert an EPUB normally, open the generated Editable.md, "
-            "make edits, then render that edited Markdown back into a printable PDF."
+            "Iterative workflow: convert EPUB → edit the generated Editable.md → "
+            "render the edited Markdown back into PDF/DOCX without reprocessing the EPUB."
         )
         help_text.setWordWrap(True)
         help_text.setAlignment(Qt.AlignLeft)
 
+        md_row = QHBoxLayout()
+        md_row.addWidget(self.markdown_path, 1)
+        md_row.addWidget(self.choose_md_btn)
+        md_row.addWidget(self.open_md_btn)
+
+        out_row = QHBoxLayout()
+        out_row.addWidget(self.output_dir, 1)
+        out_row.addWidget(self.choose_out_btn)
+
+        form = QFormLayout()
+        form.addRow("Edited Markdown", md_row)
+        form.addRow("Output Folder", out_row)
+        form.addRow("Title Override", self.title_override)
+        form.addRow("Author Override", self.author_override)
+        form.addRow("TOC Mode", self.toc_mode)
+
+        options_box = QGroupBox("Outputs")
+        options_layout = QGridLayout(options_box)
+        options_layout.addWidget(self.export_pdf, 0, 0)
+        options_layout.addWidget(self.export_docx, 0, 1)
+        options_layout.addWidget(self.copy_markdown, 1, 0, 1, 2)
+
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.open_output_btn)
+        action_row.addWidget(self.open_pdf_btn)
+        action_row.addWidget(self.open_docx_btn)
+        action_row.addStretch(1)
+        action_row.addWidget(self.render_btn)
+        action_row.addWidget(self.close_btn)
+
         layout = QVBoxLayout(self)
         layout.addWidget(help_text)
         layout.addLayout(form)
+        layout.addWidget(options_box)
         layout.addWidget(self.log, 1)
-        layout.addLayout(buttons)
+        layout.addLayout(action_row)
+
+    def set_markdown_path(self, path: str | Path) -> None:
+        path = Path(path)
+        self.markdown_path.setText(str(path))
+        if not self.output_dir.text().strip():
+            self.output_dir.setText(str(path.parent / f"{path.stem}_rendered"))
 
     def choose_markdown(self) -> None:
-        path, _ = QFileDialog, QComboBox.getOpenFileName(
+        path, _ = QFileDialog.getOpenFileName(
             self,
             "Choose edited Markdown file",
             str(Path.home()),
-            "Markdown files (*.md *.markdown);;All files (*)",
+            "Markdown files (*.md *.markdown *.txt);;All files (*)",
         )
         if path:
-            self.markdown_path.setText(path)
-            if not self.output_dir.text().strip():
-                default_out = Path(path).with_suffix("").parent / f"{Path(path).stem}_rendered"
-                self.output_dir.setText(str(default_out))
+            self.set_markdown_path(path)
 
     def choose_output_dir(self) -> None:
-        path = QFileDialog, QComboBox.getExistingDirectory(
+        path = QFileDialog.getExistingDirectory(
             self,
             "Choose output folder",
             str(Path.home()),
@@ -126,45 +187,120 @@ class MarkdownRenderDialog(QDialog):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
-    def render_markdown(self) -> None:
+    def open_output_folder(self) -> None:
+        path = self.last_output_dir or Path(self.output_dir.text().strip())
+        if not path.exists():
+            QMessageBox.warning(self, "Output folder missing", "Render the Markdown first or choose an existing output folder.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _open_latest_by_suffix(self, suffixes: set[str], label: str) -> None:
+        for path in self.last_output_files:
+            if path.suffix.lower() in suffixes and path.exists():
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+                return
+        QMessageBox.warning(self, f"{label} missing", f"No rendered {label} file was found yet.")
+
+    def open_latest_pdf(self) -> None:
+        self._open_latest_by_suffix({".pdf"}, "PDF")
+
+    def open_latest_docx(self) -> None:
+        self._open_latest_by_suffix({".docx"}, "DOCX")
+
+    def _validate(self) -> tuple[Path, Path] | None:
         md = Path(self.markdown_path.text().strip())
         out = Path(self.output_dir.text().strip())
 
         if not md.exists():
             QMessageBox.warning(self, "Markdown not found", "Choose an existing Markdown file first.")
-            return
-        if md.suffix.lower() not in {".md", ".markdown"}:
-            QMessageBox.warning(self, "Expected Markdown", "Please choose a .md or .markdown file.")
-            return
-        if not out:
+            return None
+
+        if md.suffix.lower() not in {".md", ".markdown", ".txt"}:
+            QMessageBox.warning(self, "Expected Markdown", "Please choose a .md, .markdown, or .txt file.")
+            return None
+
+        if not str(out).strip():
             QMessageBox.warning(self, "Output folder required", "Choose an output folder.")
+            return None
+
+        if not self.export_pdf.isChecked() and not self.export_docx.isChecked() and not self.copy_markdown.isChecked():
+            QMessageBox.warning(self, "No outputs selected", "Select at least one output type.")
+            return None
+
+        return md, out
+
+    def render_markdown(self) -> None:
+        validated = self._validate()
+        if validated is None:
             return
 
+        md, out = validated
         root = Path(__file__).resolve().parents[2]
         script = root / "scripts" / "render_markdown_book.py"
+
         if not script.exists():
             QMessageBox.critical(self, "Renderer missing", f"Could not find {script}")
             return
 
         cmd = [sys.executable, str(script), str(md), str(out)]
+
+        title = self.title_override.text().strip()
+        author = self.author_override.text().strip()
+        if title:
+            cmd.extend(["--title", title])
+        if author:
+            cmd.extend(["--author", author])
+
+        if not self.export_pdf.isChecked():
+            cmd.append("--no-pdf")
         if self.export_docx.isChecked():
             cmd.append("--docx")
+        if not self.copy_markdown.isChecked():
+            cmd.append("--no-copy-markdown")
 
-        self.log.append("COMMAND:\n" + " ".join(cmd) + "\n")
+        cmd.extend(["--toc-mode", str(self.toc_mode.currentData() or "keep")])
+
+        report_json = out / "markdown_render_report.json"
+        cmd.extend(["--report-json", str(report_json)])
+
         out.mkdir(parents=True, exist_ok=True)
+
+        self.log.clear()
+        self.log.append("COMMAND:\n" + " ".join(cmd) + "\n")
 
         env = dict(os.environ)
         env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
 
-        result = subprocess.run(cmd, text=True, capture_output=True, cwd=root, env=env)
+        self.render_btn.setEnabled(False)
+        try:
+            result = subprocess.run(cmd, text=True, capture_output=True, cwd=root, env=env)
+        finally:
+            self.render_btn.setEnabled(True)
+
         if result.stdout:
             self.log.append("STDOUT:\n" + result.stdout)
         if result.stderr:
             self.log.append("STDERR:\n" + result.stderr)
 
+        self.last_output_files = []
+        self.last_output_dir = out
+
+        if report_json.exists():
+            try:
+                data = json.loads(report_json.read_text(encoding="utf-8"))
+                self.last_output_files = [Path(p) for p in data.get("output_files", [])]
+            except Exception as exc:
+                self.log.append(f"\nCould not parse report JSON: {exc}")
+
+        if not self.last_output_files and out.exists():
+            self.last_output_files = sorted(out.glob("*"))
+
+        self.open_output_btn.setEnabled(out.exists())
+        self.open_pdf_btn.setEnabled(any(p.suffix.lower() == ".pdf" and p.exists() for p in self.last_output_files))
+        self.open_docx_btn.setEnabled(any(p.suffix.lower() == ".docx" and p.exists() for p in self.last_output_files))
+
         if result.returncode == 0:
             QMessageBox.information(self, "Render complete", f"Rendered files to:\n{out}")
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
         else:
             QMessageBox.critical(
                 self,

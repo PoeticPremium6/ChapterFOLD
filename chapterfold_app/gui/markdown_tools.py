@@ -1,30 +1,71 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 try:
     from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QPushButton, QDialog
+    from PySide6.QtWidgets import QPushButton
 except Exception:  # pragma: no cover
     QAction = None
     QPushButton = None
-    QDialog = None
+
+
+def _latest_markdown_from_main_window(main_window: Any) -> Path | None:
+    candidates: list[Any] = [
+        getattr(main_window, "output_markdown", None),
+        getattr(main_window, "last_markdown_path", None),
+        getattr(main_window, "_last_markdown_path", None),
+    ]
+
+    payload = getattr(main_window, "_last_payload", None) or getattr(main_window, "last_payload", None)
+    if isinstance(payload, dict):
+        candidates.extend(
+            [
+                payload.get("output_markdown"),
+                payload.get("markdown_path"),
+                payload.get("output_markdown_path"),
+            ]
+        )
+
+        for item in payload.get("output_files", []) or []:
+            candidates.append(item)
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(str(candidate))
+        if path.suffix.lower() in {".md", ".markdown", ".txt"} and path.exists():
+            return path
+
+    return None
+
+
+def _default_output_dir_for_markdown(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    return path.parent / f"{path.stem}_rendered"
 
 
 def _open_markdown_render_dialog(parent: Any) -> None:
     from chapterfold_app.gui.markdown_render_dialog import MarkdownRenderDialog
 
-    dialog = MarkdownRenderDialog(parent)
+    md = _latest_markdown_from_main_window(parent)
+    dialog = MarkdownRenderDialog(
+        parent,
+        initial_markdown_path=md,
+        initial_output_dir=_default_output_dir_for_markdown(md),
+    )
     dialog.exec()
 
 
 def _find_or_create_menu(main_window: Any, title: str):
     menu_bar = main_window.menuBar()
 
-    if not hasattr(main_window, '_chapterfold_extra_menus'):
+    if not hasattr(main_window, "_chapterfold_extra_menus"):
         main_window._chapterfold_extra_menus = {}
 
-    key = title.replace('&', '')
+    key = title.replace("&", "")
     existing = main_window._chapterfold_extra_menus.get(key)
     if existing is not None:
         try:
@@ -36,7 +77,7 @@ def _find_or_create_menu(main_window: Any, title: str):
     for action in menu_bar.actions():
         try:
             menu = action.menu()
-            if menu is not None and menu.title().replace('&', '') == key:
+            if menu is not None and menu.title().replace("&", "") == key:
                 main_window._chapterfold_extra_menus[key] = menu
                 return menu
         except RuntimeError:
@@ -48,29 +89,24 @@ def _find_or_create_menu(main_window: Any, title: str):
 
 
 def install_markdown_render_action(main_window: Any) -> bool:
-    """Install Tools > Render Edited Markdown... on the main ChapterFOLD window."""
-    if QAction is None:
-        return False
-    if not hasattr(main_window, 'menuBar'):
+    if QAction is None or not hasattr(main_window, "menuBar"):
         return False
 
-    if getattr(main_window, '_chapterfold_markdown_render_action_installed', False):
+    if getattr(main_window, "_chapterfold_markdown_render_action_installed", False):
         return True
 
-    tools_menu = _find_or_create_menu(main_window, '&Tools')
-    action_text = 'Render Edited Markdown...'
+    tools_menu = _find_or_create_menu(main_window, "&Tools")
+    action_text = "Render Edited Markdown..."
 
-    try:
-        for action in tools_menu.actions():
-            if action.text().replace('&', '') == action_text:
+    for action in tools_menu.actions():
+        try:
+            if action.text().replace("&", "") == action_text:
                 main_window._chapterfold_markdown_render_action = action
                 main_window._chapterfold_markdown_render_menu = tools_menu
                 main_window._chapterfold_markdown_render_action_installed = True
                 return True
-    except RuntimeError:
-        if hasattr(main_window, '_chapterfold_extra_menus'):
-            main_window._chapterfold_extra_menus.pop('Tools', None)
-        tools_menu = _find_or_create_menu(main_window, '&Tools')
+        except RuntimeError:
+            continue
 
     action = QAction(action_text, main_window)
     action.triggered.connect(lambda checked=False: _open_markdown_render_dialog(main_window))
@@ -83,18 +119,12 @@ def install_markdown_render_action(main_window: Any) -> bool:
 
 
 def install_markdown_render_button(main_window: Any) -> bool:
-    """Add a visible Render Edited Markdown button beside the existing output buttons.
-
-    This is intentionally tolerant. It searches for the existing 'Open Markdown'
-    button, adds the new button to the same layout, and keeps Python references
-    alive on the main window. If the button already exists, it returns True.
-    """
     if QPushButton is None:
         return False
-    if getattr(main_window, '_chapterfold_markdown_render_button_installed', False):
+
+    if getattr(main_window, "_chapterfold_markdown_render_button_installed", False):
         return True
 
-    existing_buttons = []
     try:
         existing_buttons = main_window.findChildren(QPushButton)
     except Exception:
@@ -102,7 +132,7 @@ def install_markdown_render_button(main_window: Any) -> bool:
 
     for button in existing_buttons:
         try:
-            if button.text().replace('&', '') == 'Render Edited Markdown':
+            if button.text().replace("&", "") == "Render Edited Markdown":
                 main_window._chapterfold_markdown_render_button = button
                 main_window._chapterfold_markdown_render_button_installed = True
                 return True
@@ -112,15 +142,14 @@ def install_markdown_render_button(main_window: Any) -> bool:
     anchor = None
     for button in existing_buttons:
         try:
-            label = button.text().replace('&', '')
+            label = button.text().replace("&", "")
         except RuntimeError:
             continue
-        if label in {'Open Markdown', 'Open Markdown File'}:
+        if label in {"Open Markdown", "Open Markdown File"}:
             anchor = button
             break
 
     if anchor is None:
-        # Fall back to menu-only integration if the current UI shape is unknown.
         return False
 
     parent = anchor.parentWidget()
@@ -128,11 +157,10 @@ def install_markdown_render_button(main_window: Any) -> bool:
     if layout is None:
         return False
 
-    new_button = QPushButton('Render Edited Markdown', parent)
-    new_button.setToolTip('Render an edited ChapterFOLD Markdown file back into PDF/DOCX outputs.')
+    new_button = QPushButton("Render Edited Markdown", parent)
+    new_button.setToolTip("Render an edited ChapterFOLD Markdown file back into PDF/DOCX outputs.")
     new_button.clicked.connect(lambda checked=False: _open_markdown_render_dialog(main_window))
 
-    # Try to place it immediately after Open Markdown; fall back to appending.
     inserted = False
     try:
         for idx in range(layout.count()):
@@ -157,7 +185,6 @@ def install_markdown_render_button(main_window: Any) -> bool:
 
 
 def install_markdown_render_ui(main_window: Any) -> bool:
-    """Install both menu and visible button entry points when possible."""
     menu_ok = install_markdown_render_action(main_window)
     button_ok = install_markdown_render_button(main_window)
     return bool(menu_ok or button_ok)

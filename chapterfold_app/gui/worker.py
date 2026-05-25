@@ -7,7 +7,10 @@ from zipfile import BadZipFile
 from PySide6.QtCore import QObject, Signal, Slot
 from ebooklib.epub import EpubException
 
-from services.chapterfold_runner import run_processing
+try:
+    from chapterfold_app.services.chapterfold_runner import run_processing
+except ModuleNotFoundError:
+    from services.chapterfold_runner import run_processing
 
 
 class Worker(QObject):
@@ -33,6 +36,8 @@ class Worker(QObject):
         custom_margin_bottom_cm: float | None,
         custom_margin_inside_cm: float | None,
         custom_margin_outside_cm: float | None,
+        output_font_key: str = "classic-serif",
+        contents_mode: str = "rebuild",
         imposition_mode: str,
         imposed_pages_per_signature: int,
         binding_direction: str,
@@ -54,6 +59,8 @@ class Worker(QObject):
         self.custom_margin_bottom_cm = custom_margin_bottom_cm
         self.custom_margin_inside_cm = custom_margin_inside_cm
         self.custom_margin_outside_cm = custom_margin_outside_cm
+        self.output_font_key = output_font_key
+        self.contents_mode = contents_mode
         self.imposition_mode = imposition_mode
         self.imposed_pages_per_signature = imposed_pages_per_signature
         self.binding_direction = binding_direction
@@ -77,6 +84,8 @@ class Worker(QObject):
                 custom_margin_bottom_cm=self.custom_margin_bottom_cm,
                 custom_margin_inside_cm=self.custom_margin_inside_cm,
                 custom_margin_outside_cm=self.custom_margin_outside_cm,
+                output_font_key=self.output_font_key,
+                contents_mode=self.contents_mode,
                 imposition_mode=self.imposition_mode,
                 imposed_pages_per_signature=self.imposed_pages_per_signature,
                 binding_direction=self.binding_direction,

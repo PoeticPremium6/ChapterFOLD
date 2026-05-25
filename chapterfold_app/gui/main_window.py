@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from core.font_catalog import FONT_CHOICES, get_font_choice
 
 from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
@@ -26,10 +27,13 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QFont, QAction
 from core.diagnostics import build_diagnostic_report
 
-from gui.worker import Worker
+try:
+    from chapterfold_app.gui.worker import Worker
+except ModuleNotFoundError:
+    from gui.worker import Worker
 from chapterfold_app.gui.markdown_tools import install_markdown_render_action
 
 
@@ -242,6 +246,13 @@ class MainWindow(QMainWindow):
         self.spacing_mode_combo.addItem("Indented compact (minimal paragraph gap + indents)", "indented-compact")
         self.spacing_mode_combo.addItem("Uniform (no paragraph gap, no indents)", "uniform")
 
+        self.contents_mode_combo = QComboBox()
+        self.contents_mode_combo.addItem("Rebuild clean contents", "rebuild")
+        self.contents_mode_combo.addItem("Rebuild clean contents with PDF page numbers", "rebuild-paged")
+        self.contents_mode_combo.addItem("Remove source contents", "remove")
+        self.contents_mode_combo.addItem("Keep source contents", "keep")
+        self.contents_mode_combo.setToolTip("Choose how ChapterFOLD handles the book's table of contents.")
+
         self.page_size_combo = QComboBox()
         self.page_size_combo.addItem("Default trade (6 x 9 in)", "default-trade")
         self.page_size_combo.addItem("A4", "a4")
@@ -252,6 +263,15 @@ class MainWindow(QMainWindow):
         self.page_size_combo.addItem("Trade 5 x 8 in", "trade-5x8")
         self.page_size_combo.addItem("Trade 6 x 9 in", "trade-6x9")
         self.page_size_combo.addItem("Custom size", "custom")
+        self.font_combo = QComboBox()
+        for choice in FONT_CHOICES:
+            self.font_combo.addItem(choice.dropdown_label, choice.key)
+            index = self.font_combo.count() - 1
+            self.font_combo.setItemData(index, choice.description, Qt.ToolTipRole)
+            # Show each option in an approximate matching family when available.
+            primary_family = choice.css_stack.split(",")[0].strip().strip('"')
+            self.font_combo.setItemData(index, QFont(primary_family, 11), Qt.FontRole)
+        self.font_combo.setToolTip("Choose the output font. Each option includes a suggested use case.")
 
         self.margin_preset_combo = QComboBox()
         self.margin_preset_combo.addItem("Standard", "standard")
@@ -373,6 +393,12 @@ class MainWindow(QMainWindow):
         self.open_imposed_btn = QPushButton("Open Imposed PDF")
         self.open_imposed_btn.setEnabled(False)
 
+        self.open_signature_plan_btn = QPushButton("Open Signature Plan")
+        self.open_signature_plan_btn.setEnabled(False)
+
+        self.open_signature_batches_btn = QPushButton("Open Signature Batches")
+        self.open_signature_batches_btn.setEnabled(False)
+
         self.prev_preview_btn = QPushButton("Previous")
         self.next_preview_btn = QPushButton("Next")
         self.prev_preview_btn.setEnabled(False)
@@ -383,6 +409,8 @@ class MainWindow(QMainWindow):
         self.last_output_docx: str | None = None
         self.last_output_markdown: str | None = None
         self.last_imposed_pdf: str | None = None
+        self.last_signature_plan: str | None = None
+        self.last_signature_batches: str | None = None
         self.preview_samples: list[dict[str, str]] = []
         self.current_preview_index = 0
 
@@ -463,6 +491,8 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.open_docx_btn)
         action_row.addWidget(self.open_markdown_btn)
         action_row.addWidget(self.open_imposed_btn)
+        action_row.addWidget(self.open_signature_plan_btn)
+        action_row.addWidget(self.open_signature_batches_btn)
         action_row.addStretch()
         action_row.addWidget(self.process_btn)
         root.addLayout(action_row)
@@ -535,8 +565,13 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Paragraph spacing"), 2, 0)
         layout.addWidget(self.spacing_mode_combo, 2, 1)
 
-        layout.addWidget(QLabel("Page size"), 3, 0)
-        layout.addWidget(self.page_size_combo, 3, 1)
+        layout.addWidget(QLabel("Contents mode"), 3, 0)
+        layout.addWidget(self.contents_mode_combo, 3, 1)
+
+        layout.addWidget(QLabel("Page size"), 4, 0)
+        layout.addWidget(self.page_size_combo, 4, 1)
+        layout.addWidget(QLabel("Output font"), 4, 0)
+        layout.addWidget(self.font_combo, 4, 1)
 
         self.custom_trim_widget = self._build_two_spin_row(
             "Width",
@@ -649,6 +684,8 @@ class MainWindow(QMainWindow):
         self.open_docx_btn.clicked.connect(self._open_docx)
         self.open_markdown_btn.clicked.connect(self._open_markdown)
         self.open_imposed_btn.clicked.connect(self._open_imposed_pdf)
+        self.open_signature_plan_btn.clicked.connect(self._open_signature_plan)
+        self.open_signature_batches_btn.clicked.connect(self._open_signature_batches)
         self.prev_preview_btn.clicked.connect(self._show_previous_preview)
         self.next_preview_btn.clicked.connect(self._show_next_preview)
         self.export_docx_btn.toggled.connect(self._refresh_output_toggle_styles)
@@ -688,7 +725,9 @@ class MainWindow(QMainWindow):
         self.export_docx_btn.setEnabled(not busy)
         self.export_markdown_btn.setEnabled(not busy)
         self.spacing_mode_combo.setEnabled(not busy)
+        self.contents_mode_combo.setEnabled(not busy)
         self.page_size_combo.setEnabled(not busy)
+        self.font_combo.setEnabled(not busy)
         self.margin_preset_combo.setEnabled(not busy)
         self.trim_width_spin.setEnabled(not busy)
         self.trim_height_spin.setEnabled(not busy)
@@ -716,6 +755,8 @@ class MainWindow(QMainWindow):
         self.last_output_docx = None
         self.last_output_markdown = None
         self.last_imposed_pdf = None
+        self.last_signature_plan = None
+        self.last_signature_batches = None
         self.open_output_btn.setEnabled(False)
         self.open_pdf_btn.setEnabled(False)
         self.open_docx_btn.setEnabled(False)
@@ -729,7 +770,9 @@ class MainWindow(QMainWindow):
         export_docx = self.export_docx_btn.isChecked()
         export_markdown = self.export_markdown_btn.isChecked()
         paragraph_spacing_mode = self.spacing_mode_combo.currentData()
+        contents_mode = self.contents_mode_combo.currentData() or "rebuild"
         page_size_preset = self.page_size_combo.currentData()
+        output_font_key = self.font_combo.currentData() or "classic-serif"
         margin_preset = self.margin_preset_combo.currentData()
 
         custom_trim_width_cm = self.trim_width_spin.value() if page_size_preset == "custom" else None
@@ -783,6 +826,8 @@ class MainWindow(QMainWindow):
             custom_margin_bottom_cm=custom_margin_bottom_cm,
             custom_margin_inside_cm=custom_margin_inside_cm,
             custom_margin_outside_cm=custom_margin_outside_cm,
+            output_font_key=output_font_key,
+            contents_mode=contents_mode,
             imposition_mode=imposition_mode,
             imposed_pages_per_signature=imposed_pages_per_signature,
             binding_direction=binding_direction,
@@ -822,6 +867,8 @@ class MainWindow(QMainWindow):
             f"Author: {payload.get('author', '')}",
             f"Cleanup mode: {payload.get('variant_label', payload.get('variant', ''))}",
             f"Paragraph spacing mode: {payload.get('paragraph_spacing_mode_label', '')}",
+            f"Output font: {payload.get('output_font_label', '')}",
+            f"Contents mode: {payload.get('contents_mode', '')}",
             f"Page size: {payload.get('page_size_preset_label', '')}",
             f"Trim size: {payload.get('trim_width_cm', '')} x {payload.get('trim_height_cm', '')} cm",
             f"Margins: {payload.get('margin_preset_label', '')}",
@@ -884,6 +931,8 @@ class MainWindow(QMainWindow):
                 f"Total signatures: {payload.get('imposed_total_signatures', 'N/A')}",
                 f"Output sheet sides: {payload.get('imposed_output_sheet_sides', 'N/A')}",
                 f"Physical sheets total: {payload.get('imposed_physical_sheets_total', 'N/A')}",
+                f"Signature plan: {payload.get('signature_plan_markdown', '')}",
+                f"Signature batches: {payload.get('signature_batches_markdown') or payload.get('signature_batches_docx') or ''}",
             ])
 
         lines.extend([
@@ -899,12 +948,16 @@ class MainWindow(QMainWindow):
         self.last_output_docx = payload.get("output_docx", "")
         self.last_output_markdown = payload.get("output_markdown", "")
         self.last_imposed_pdf = payload.get("imposed_output_pdf", "")
+        self.last_signature_plan = payload.get("signature_plan_markdown") or payload.get("signature_plan_json") or ""
+        self.last_signature_batches = payload.get("signature_batches_markdown") or payload.get("signature_batches_docx") or ""
 
         self.open_output_btn.setEnabled(bool(self.last_output_dir))
         self.open_pdf_btn.setEnabled(bool(self.last_output_pdf))
         self.open_docx_btn.setEnabled(bool(self.last_output_docx))
         self.open_markdown_btn.setEnabled(bool(self.last_output_markdown))
         self.open_imposed_btn.setEnabled(bool(self.last_imposed_pdf))
+        self.open_signature_plan_btn.setEnabled(bool(self.last_signature_plan))
+        self.open_signature_batches_btn.setEnabled(bool(self.last_signature_batches))
 
         self.results_box.setPlainText(self._build_results_text(payload))
 
@@ -1000,6 +1053,24 @@ class MainWindow(QMainWindow):
             return
 
         os.startfile(str(path))
+
+    def _open_signature_plan(self) -> None:
+        if not self.last_signature_plan:
+            return
+        path = Path(self.last_signature_plan)
+        if not path.exists():
+            QMessageBox.warning(self, "Missing file", "The signature plan file no longer exists.")
+            return
+        self._open_path(path)
+
+    def _open_signature_batches(self) -> None:
+        if not self.last_signature_batches:
+            return
+        path = Path(self.last_signature_batches)
+        if not path.exists():
+            QMessageBox.warning(self, "Missing file", "The signature batches file no longer exists.")
+            return
+        self._open_path(path)
 
     def _open_imposed_pdf(self) -> None:
         if not self.last_imposed_pdf:

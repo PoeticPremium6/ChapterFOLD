@@ -57,7 +57,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from PySide6.QtWidgets import QApplication
-from gui.main_window import MainWindow
+try:
+    from chapterfold_app.gui.main_window import MainWindow
+except ModuleNotFoundError:  # Allows running app.py directly from chapterfold_app/
+    from gui.main_window import MainWindow
 from chapterfold_app.gui.markdown_tools import install_markdown_render_ui
 
 

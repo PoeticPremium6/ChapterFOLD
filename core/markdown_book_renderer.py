@@ -16,6 +16,7 @@ from html import escape
 from pathlib import Path
 import re
 from core.toc_rendering import apply_toc_mode_to_markdown
+from core.font_policy import UNICODE_PDF_FONT_STACK
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,7 @@ def build_print_html(markdown_text: str, *, title: str | None = None, author: st
     body = markdown_to_html_body(markdown_text)
 
     title_html = escape(title)
+    font_stack = UNICODE_PDF_FONT_STACK
     author_html = escape(author) if author else ""
 
     return f"""<!doctype html>
@@ -172,7 +174,7 @@ def build_print_html(markdown_text: str, *, title: str | None = None, author: st
   @bottom-center {{ content: counter(page); font-size: 9pt; color: #555; }}
 }}
 body {{
-  font-family: serif;
+  font-family: {font_stack};
   font-size: 11pt;
   line-height: 1.32;
   color: #111;
