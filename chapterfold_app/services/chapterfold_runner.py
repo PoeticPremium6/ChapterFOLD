@@ -155,6 +155,8 @@ def build_layout_settings(
     custom_margin_outside_cm: float | None,
     output_font_key: str = "classic-serif",
     contents_mode: str = "rebuild",
+    page_number_start_mode: str = "after-title-page",
+    front_matter_page_number_style: str = "hidden",
 ) -> LayoutSettings:
     layout = LayoutSettings(
         paragraph_spacing_mode=paragraph_spacing_mode,
@@ -163,6 +165,8 @@ def build_layout_settings(
     font_choice = get_font_choice(output_font_key)
     layout.font_family = font_choice.css_stack
     layout.contents_mode = contents_mode
+    layout.page_number_start_mode = page_number_start_mode
+    layout.front_matter_page_number_style = front_matter_page_number_style
 
     size_key = (page_size_preset or "default-trade").strip().lower()
     if size_key == "custom":
@@ -361,6 +365,8 @@ def run_processing(
     custom_margin_outside_cm: float | None,
     output_font_key: str = "classic-serif",
     contents_mode: str = "rebuild",
+    page_number_start_mode: str = "after-title-page",
+    front_matter_page_number_style: str = "hidden",
     imposition_mode: str,
     imposed_pages_per_signature: int,
     binding_direction: str,
@@ -389,6 +395,8 @@ def run_processing(
         custom_margin_outside_cm=custom_margin_outside_cm,
         output_font_key=output_font_key,
         contents_mode=contents_mode,
+        page_number_start_mode=page_number_start_mode,
+        front_matter_page_number_style=front_matter_page_number_style,
     )
 
     create_imposed_pdf = (imposition_mode or "none").strip().lower() == "also"
@@ -435,6 +443,8 @@ def run_processing(
     font_choice = get_font_choice(output_font_key)
     log(f"Output font: {font_choice.label}")
     log(f"Contents mode: {contents_mode}")
+    log(f"Page number start: {page_number_start_mode}")
+    log(f"Front matter numbers: {front_matter_page_number_style}")
     log(f"Page size: {describe_page_size_preset(page_size_preset)}")
     log(f"Trim size: {layout_settings.trim_width_cm:.2f} cm x {layout_settings.trim_height_cm:.2f} cm")
     log(f"Margin preset: {describe_margin_preset(margin_preset)}")
@@ -616,6 +626,8 @@ def run_processing(
         "paragraph_spacing_mode": paragraph_spacing_mode,
         "paragraph_spacing_mode_label": describe_spacing_mode(paragraph_spacing_mode),
         "contents_mode": contents_mode,
+        "page_number_start_mode": page_number_start_mode,
+        "front_matter_page_number_style": front_matter_page_number_style,
         "output_font_key": output_font_key,
         "output_font_label": get_font_choice(output_font_key).label,
         "page_size_preset": page_size_preset,

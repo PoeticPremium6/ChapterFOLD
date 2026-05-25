@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "input_type": "pdf",
+  "input_pdf": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/pdf/Designing Data Intensive Applications - Martin Kleppmann-1.pdf",
+  "output_dir": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD",
+  "page_count": 613,
+  "output_files": [
+    "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Interior.pdf",
+    "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Imposed.pdf",
+    "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Signature Plan.json",
+    "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Signature Plan.md"
+  ],
+  "interior_pdf": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Interior.pdf",
+  "imposed_pdf": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Imposed.pdf",
+  "signature_plan_json": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Signature Plan.json",
+  "signature_plan_markdown": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Designing Data Intensive Applications - Martin Kleppmann-1 - Signature Plan.md",
+  "warnings": [],
+  "error": null,
+  "stage": "complete"
+}

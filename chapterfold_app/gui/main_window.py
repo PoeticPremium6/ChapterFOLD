@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from core.font_catalog import FONT_CHOICES, get_font_choice
 
@@ -253,6 +255,20 @@ class MainWindow(QMainWindow):
         self.contents_mode_combo.addItem("Keep source contents", "keep")
         self.contents_mode_combo.setToolTip("Choose how ChapterFOLD handles the book's table of contents.")
 
+        self.page_number_start_combo = QComboBox()
+        self.page_number_start_combo.addItem("After title page (hide title page number)", "after-title-page")
+        self.page_number_start_combo.addItem("At main text / first body chapter", "main-text")
+        self.page_number_start_combo.addItem("From first page", "first-page")
+        self.page_number_start_combo.addItem("No page numbers", "none")
+        self.page_number_start_combo.setToolTip("Choose where visible PDF page numbers begin.")
+
+        self.front_matter_numbers_combo = QComboBox()
+        self.front_matter_numbers_combo.addItem("Hidden", "hidden")
+        self.front_matter_numbers_combo.addItem("Roman lowercase (i, ii, iii)", "roman-lower")
+        self.front_matter_numbers_combo.addItem("Roman uppercase (I, II, III)", "roman-upper")
+        self.front_matter_numbers_combo.addItem("Arabic (1, 2, 3)", "arabic")
+        self.front_matter_numbers_combo.setToolTip("Optional front matter numbering; most useful when page numbers start at main text.")
+
         self.page_size_combo = QComboBox()
         self.page_size_combo.addItem("Default trade (6 x 9 in)", "default-trade")
         self.page_size_combo.addItem("A4", "a4")
@@ -364,13 +380,13 @@ class MainWindow(QMainWindow):
         self.title_label.setObjectName("titleLabel")
 
         self.subtitle_label = QLabel(
-            "Convert EPUBs into cleaner print-ready interiors and optional imposed signature PDFs."
+            "Convert EPUBs into clean print interiors, or prepare existing PDFs for binding/imposition."
         )
         self.subtitle_label.setObjectName("subtitleLabel")
 
         self.preview_heading_label = QLabel("Text preview sample: none")
         self.preview_index_label = QLabel("0 / 0")
-        self.status_label = QLabel("Ready to process an EPUB")
+        self.status_label = QLabel("Ready to process an EPUB or PDF")
         self.status_label.setObjectName("statusLabel")
 
         self.browse_input_btn = QPushButton("Browse...")
@@ -398,6 +414,7 @@ class MainWindow(QMainWindow):
 
         self.open_signature_batches_btn = QPushButton("Open Signature Batches")
         self.open_signature_batches_btn.setEnabled(False)
+
 
         self.prev_preview_btn = QPushButton("Previous")
         self.next_preview_btn = QPushButton("Next")
@@ -519,14 +536,14 @@ class MainWindow(QMainWindow):
         layout.setVerticalSpacing(12)
 
         layout.addWidget(
-            self._hint_label("Choose the source EPUB and where the outputs should be saved."),
+            self._hint_label("Choose the source EPUB or PDF and where the outputs should be saved."),
             0,
             0,
             1,
             3,
         )
 
-        layout.addWidget(QLabel("Input EPUB"), 1, 0)
+        layout.addWidget(QLabel("Input EPUB/PDF"), 1, 0)
         layout.addWidget(self.input_edit, 1, 1)
         layout.addWidget(self.browse_input_btn, 1, 2)
 
@@ -545,13 +562,13 @@ class MainWindow(QMainWindow):
         layout = QGridLayout(group)
         layout.setHorizontalSpacing(14)
         layout.setVerticalSpacing(12)
-        layout.setColumnMinimumWidth(0, 150)
+        layout.setColumnMinimumWidth(0, 170)
         layout.setColumnStretch(1, 1)
 
         layout.addWidget(
             self._hint_label(
                 "Choose cleanup strength, typography, optional signature imposition, and editable export formats. "
-                "Drag the divider between Book and this panel to make this area wider."
+                "For PDF input, ChapterFOLD uses a binding/imposition-only workflow."
             ),
             0,
             0,
@@ -559,19 +576,35 @@ class MainWindow(QMainWindow):
             2,
         )
 
-        layout.addWidget(QLabel("Cleanup mode"), 1, 0)
-        layout.addWidget(self.variant_combo, 1, 1)
+        row = 1
 
-        layout.addWidget(QLabel("Paragraph spacing"), 2, 0)
-        layout.addWidget(self.spacing_mode_combo, 2, 1)
+        layout.addWidget(QLabel("Cleanup mode"), row, 0)
+        layout.addWidget(self.variant_combo, row, 1)
+        row += 1
 
-        layout.addWidget(QLabel("Contents mode"), 3, 0)
-        layout.addWidget(self.contents_mode_combo, 3, 1)
+        layout.addWidget(QLabel("Paragraph spacing"), row, 0)
+        layout.addWidget(self.spacing_mode_combo, row, 1)
+        row += 1
 
-        layout.addWidget(QLabel("Page size"), 4, 0)
-        layout.addWidget(self.page_size_combo, 4, 1)
-        layout.addWidget(QLabel("Output font"), 4, 0)
-        layout.addWidget(self.font_combo, 4, 1)
+        layout.addWidget(QLabel("Contents mode"), row, 0)
+        layout.addWidget(self.contents_mode_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Page numbers"), row, 0)
+        layout.addWidget(self.page_number_start_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Front matter numbers"), row, 0)
+        layout.addWidget(self.front_matter_numbers_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Output font"), row, 0)
+        layout.addWidget(self.font_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Page size"), row, 0)
+        layout.addWidget(self.page_size_combo, row, 1)
+        row += 1
 
         self.custom_trim_widget = self._build_two_spin_row(
             "Width",
@@ -579,10 +612,12 @@ class MainWindow(QMainWindow):
             "Height",
             self.trim_height_spin,
         )
-        layout.addWidget(self.custom_trim_widget, 4, 1)
+        layout.addWidget(self.custom_trim_widget, row, 1)
+        row += 1
 
-        layout.addWidget(QLabel("Margins"), 5, 0)
-        layout.addWidget(self.margin_preset_combo, 5, 1)
+        layout.addWidget(QLabel("Margins"), row, 0)
+        layout.addWidget(self.margin_preset_combo, row, 1)
+        row += 1
 
         self.custom_margin_widget = QWidget()
         custom_margin_layout = QVBoxLayout(self.custom_margin_widget)
@@ -594,9 +629,26 @@ class MainWindow(QMainWindow):
         custom_margin_layout.addWidget(
             self._build_two_spin_row("Inside", self.margin_inside_spin, "Outside", self.margin_outside_spin)
         )
-        layout.addWidget(self.custom_margin_widget, 6, 1)
+        layout.addWidget(self.custom_margin_widget, row, 1)
+        row += 1
 
-        layout.addWidget(QLabel("Editable outputs"), 7, 0)
+        layout.addWidget(QLabel("Imposition output"), row, 0)
+        layout.addWidget(self.imposition_mode_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Pages per signature"), row, 0)
+        layout.addWidget(self.signature_pages_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Binding direction"), row, 0)
+        layout.addWidget(self.binding_direction_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Max blank end pages"), row, 0)
+        layout.addWidget(self.max_end_padding_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Editable outputs"), row, 0)
 
         outputs_container = QWidget()
         outputs_layout = QVBoxLayout(outputs_container)
@@ -605,19 +657,7 @@ class MainWindow(QMainWindow):
         outputs_layout.addWidget(self.export_docx_btn)
         outputs_layout.addWidget(self.export_markdown_btn)
 
-        layout.addWidget(outputs_container, 7, 1)
-
-        layout.addWidget(QLabel("Imposition output"), 8, 0)
-        layout.addWidget(self.imposition_mode_combo, 8, 1)
-
-        layout.addWidget(QLabel("Pages per signature"), 9, 0)
-        layout.addWidget(self.signature_pages_combo, 9, 1)
-
-        layout.addWidget(QLabel("Binding direction"), 10, 0)
-        layout.addWidget(self.binding_direction_combo, 10, 1)
-
-        layout.addWidget(QLabel("Max blank end pages"), 11, 0)
-        layout.addWidget(self.max_end_padding_combo, 11, 1)
+        layout.addWidget(outputs_container, row, 1)
 
         return group
 
@@ -692,13 +732,66 @@ class MainWindow(QMainWindow):
         self.export_markdown_btn.toggled.connect(self._refresh_output_toggle_styles)
         self.page_size_combo.currentIndexChanged.connect(self._sync_layout_visibility)
         self.margin_preset_combo.currentIndexChanged.connect(self._sync_layout_visibility)
+        self.input_edit.textChanged.connect(self._sync_input_mode)
+
+    def _input_suffix(self) -> str:
+        return Path(self.input_edit.text().strip()).suffix.lower()
+
+    def _is_pdf_input(self) -> bool:
+        return self._input_suffix() == ".pdf"
+
+    def _is_epub_input(self) -> bool:
+        return self._input_suffix() == ".epub"
+
+    def _sync_input_mode(self) -> None:
+        is_pdf = self._is_pdf_input()
+        is_known = self._is_epub_input() or is_pdf
+
+        self.process_btn.setText("Process PDF" if is_pdf else "Process EPUB")
+
+        # PDF mode is binding/imposition-only. EPUB-only cleanup/export controls
+        # remain visible but disabled so users understand the scope.
+        epub_controls_enabled = not is_pdf
+
+        for widget in [
+            self.variant_combo,
+            self.export_docx_btn,
+            self.export_markdown_btn,
+            self.spacing_mode_combo,
+            self.contents_mode_combo,
+            self.page_number_start_combo,
+            self.front_matter_numbers_combo,
+            self.font_combo,
+        ]:
+            widget.setEnabled(epub_controls_enabled)
+
+        if is_pdf:
+            self.export_docx_btn.setChecked(False)
+            self.export_markdown_btn.setChecked(False)
+
+            # PDF mode is mainly useful for binding, so default to imposed output
+            # unless the user explicitly changes it afterward.
+            if self.imposition_mode_combo.currentData() == "none":
+                index = self.imposition_mode_combo.findData("also")
+                if index >= 0:
+                    self.imposition_mode_combo.setCurrentIndex(index)
+
+            self.status_label.setText(
+                "PDF mode: binding/imposition only. Cleanup, DOCX, Markdown, fonts, and page-number controls are disabled."
+            )
+        elif is_known:
+            self.status_label.setText("EPUB mode: cleanup, typography, DOCX/Markdown, PDF, and imposition are available.")
+
+        self._refresh_output_toggle_styles()
+        self._sync_layout_visibility()
+
 
     def _browse_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select EPUB",
+            "Select EPUB or PDF",
             "",
-            "EPUB files (*.epub);;All files (*.*)",
+            "Book files (*.epub *.pdf);;EPUB files (*.epub);;PDF files (*.pdf);;All files (*.*)",
         )
         if path:
             self.input_edit.setText(path)
@@ -718,27 +811,36 @@ class MainWindow(QMainWindow):
             self.status_label.setText(message)
 
     def _set_busy(self, busy: bool) -> None:
-        self.process_btn.setEnabled(not busy)
-        self.browse_input_btn.setEnabled(not busy)
-        self.browse_output_btn.setEnabled(not busy)
-        self.variant_combo.setEnabled(not busy)
-        self.export_docx_btn.setEnabled(not busy)
-        self.export_markdown_btn.setEnabled(not busy)
-        self.spacing_mode_combo.setEnabled(not busy)
-        self.contents_mode_combo.setEnabled(not busy)
-        self.page_size_combo.setEnabled(not busy)
-        self.font_combo.setEnabled(not busy)
-        self.margin_preset_combo.setEnabled(not busy)
-        self.trim_width_spin.setEnabled(not busy)
-        self.trim_height_spin.setEnabled(not busy)
-        self.margin_top_spin.setEnabled(not busy)
-        self.margin_bottom_spin.setEnabled(not busy)
-        self.margin_inside_spin.setEnabled(not busy)
-        self.margin_outside_spin.setEnabled(not busy)
-        self.imposition_mode_combo.setEnabled(not busy)
-        self.signature_pages_combo.setEnabled(not busy)
-        self.binding_direction_combo.setEnabled(not busy)
-        self.max_end_padding_combo.setEnabled(not busy)
+        enabled = not busy
+        is_pdf = self._is_pdf_input()
+
+        self.process_btn.setEnabled(enabled)
+        self.browse_input_btn.setEnabled(enabled)
+        self.browse_output_btn.setEnabled(enabled)
+
+        # EPUB-only controls.
+        self.variant_combo.setEnabled(enabled and not is_pdf)
+        self.export_docx_btn.setEnabled(enabled and not is_pdf)
+        self.export_markdown_btn.setEnabled(enabled and not is_pdf)
+        self.spacing_mode_combo.setEnabled(enabled and not is_pdf)
+        self.contents_mode_combo.setEnabled(enabled and not is_pdf)
+        self.page_number_start_combo.setEnabled(enabled and not is_pdf)
+        self.front_matter_numbers_combo.setEnabled(enabled and not is_pdf)
+        self.font_combo.setEnabled(enabled and not is_pdf)
+
+        # Layout/binding controls remain available for both modes.
+        self.page_size_combo.setEnabled(enabled)
+        self.margin_preset_combo.setEnabled(enabled)
+        self.trim_width_spin.setEnabled(enabled)
+        self.trim_height_spin.setEnabled(enabled)
+        self.margin_top_spin.setEnabled(enabled)
+        self.margin_bottom_spin.setEnabled(enabled)
+        self.margin_inside_spin.setEnabled(enabled)
+        self.margin_outside_spin.setEnabled(enabled)
+        self.imposition_mode_combo.setEnabled(enabled)
+        self.signature_pages_combo.setEnabled(enabled)
+        self.binding_direction_combo.setEnabled(enabled)
+        self.max_end_padding_combo.setEnabled(enabled)
 
     def _reset_results_ui(self) -> None:
         self.results_box.clear()
@@ -771,6 +873,8 @@ class MainWindow(QMainWindow):
         export_markdown = self.export_markdown_btn.isChecked()
         paragraph_spacing_mode = self.spacing_mode_combo.currentData()
         contents_mode = self.contents_mode_combo.currentData() or "rebuild"
+        page_number_start_mode = self.page_number_start_combo.currentData() or "after-title-page"
+        front_matter_page_number_style = self.front_matter_numbers_combo.currentData() or "hidden"
         page_size_preset = self.page_size_combo.currentData()
         output_font_key = self.font_combo.currentData() or "classic-serif"
         margin_preset = self.margin_preset_combo.currentData()
@@ -789,16 +893,21 @@ class MainWindow(QMainWindow):
         max_end_padding = self.max_end_padding_combo.currentData()
 
         if not input_path:
-            QMessageBox.warning(self, "Missing input", "Please choose an EPUB file.")
+            QMessageBox.warning(self, "Missing input", "Please choose an EPUB or PDF file.")
             return
 
         if not Path(input_path).exists():
-            QMessageBox.warning(self, "Invalid input", "The selected EPUB file does not exist.")
+            QMessageBox.warning(self, "Invalid input", "The selected input file does not exist.")
             return
 
-        if Path(input_path).suffix.lower() != ".epub":
-            QMessageBox.warning(self, "Invalid input", "Please choose a file with the .epub extension.")
+        input_suffix = Path(input_path).suffix.lower()
+        if input_suffix not in {".epub", ".pdf"}:
+            QMessageBox.warning(self, "Invalid input", "Please choose a file with the .epub or .pdf extension.")
             return
+
+        if input_suffix == ".pdf":
+            export_docx = False
+            export_markdown = False
 
         if not output_dir:
             QMessageBox.warning(self, "Missing output", "Please choose an output folder.")
@@ -828,6 +937,8 @@ class MainWindow(QMainWindow):
             custom_margin_outside_cm=custom_margin_outside_cm,
             output_font_key=output_font_key,
             contents_mode=contents_mode,
+            page_number_start_mode=page_number_start_mode,
+            front_matter_page_number_style=front_matter_page_number_style,
             imposition_mode=imposition_mode,
             imposed_pages_per_signature=imposed_pages_per_signature,
             binding_direction=binding_direction,
@@ -862,6 +973,32 @@ class MainWindow(QMainWindow):
         return f"{value:+.2f} MB"
 
     def _build_results_text(self, payload: dict) -> str:
+        if payload.get("input_type") == "pdf":
+            lines = [
+                "Input type: PDF",
+                "Workflow: binding/imposition only",
+                f"Input PDF: {payload.get('input_pdf', '')}",
+                f"Interior PDF: {payload.get('interior_pdf') or payload.get('output_pdf', '')}",
+                f"Page count: {payload.get('page_count', 'N/A')}",
+            ]
+
+            if payload.get("create_imposed_pdf"):
+                lines.extend([
+                    "",
+                    "Imposed signature PDF:",
+                    f"Imposed PDF: {payload.get('imposed_output_pdf') or payload.get('imposed_pdf', '')}",
+                    f"Pages per signature: {payload.get('imposed_pages_per_signature', 'N/A')}",
+                    f"Binding direction: {payload.get('binding_direction_label', '')}",
+                    f"Max blank end pages: {payload.get('max_end_padding_label', '')}",
+                    f"Signature plan: {payload.get('signature_plan_markdown', '')}",
+                ])
+
+            lines.extend([
+                "",
+                "Note: PDF mode does not run EPUB cleanup, typography reflow, DOCX export, Markdown export, or OCR.",
+            ])
+            return "\n".join(lines)
+
         lines = [
             f"Title: {payload.get('title', '')}",
             f"Author: {payload.get('author', '')}",
@@ -869,6 +1006,8 @@ class MainWindow(QMainWindow):
             f"Paragraph spacing mode: {payload.get('paragraph_spacing_mode_label', '')}",
             f"Output font: {payload.get('output_font_label', '')}",
             f"Contents mode: {payload.get('contents_mode', '')}",
+            f"Page number start: {payload.get('page_number_start_mode', '')}",
+            f"Front matter numbers: {payload.get('front_matter_page_number_style', '')}",
             f"Page size: {payload.get('page_size_preset_label', '')}",
             f"Trim size: {payload.get('trim_width_cm', '')} x {payload.get('trim_height_cm', '')} cm",
             f"Margins: {payload.get('margin_preset_label', '')}",
@@ -944,10 +1083,10 @@ class MainWindow(QMainWindow):
 
     def _on_success(self, payload: dict) -> None:
         self.last_output_dir = payload.get("output_dir", "")
-        self.last_output_pdf = payload.get("output_pdf", "")
+        self.last_output_pdf = payload.get("output_pdf", "") or payload.get("interior_pdf", "")
         self.last_output_docx = payload.get("output_docx", "")
         self.last_output_markdown = payload.get("output_markdown", "")
-        self.last_imposed_pdf = payload.get("imposed_output_pdf", "")
+        self.last_imposed_pdf = payload.get("imposed_output_pdf", "") or payload.get("imposed_pdf", "")
         self.last_signature_plan = payload.get("signature_plan_markdown") or payload.get("signature_plan_json") or ""
         self.last_signature_batches = payload.get("signature_batches_markdown") or payload.get("signature_batches_docx") or ""
 
@@ -963,7 +1102,15 @@ class MainWindow(QMainWindow):
 
         self.preview_samples = payload.get("preview_samples", []) or []
         self.current_preview_index = 0
-        self._render_current_preview()
+        if payload.get("input_type") == "pdf":
+            self.preview_heading_label.setText("Text preview sample: PDF mode")
+            self.preview_index_label.setText("0 / 0")
+            self.before_preview.setPlainText("PDF mode uses the existing PDF pages as the source.")
+            self.after_preview.setPlainText("No EPUB cleanup or text preview is generated for PDF binding mode.")
+            self.prev_preview_btn.setEnabled(False)
+            self.next_preview_btn.setEnabled(False)
+        else:
+            self._render_current_preview()
 
         self.status_label.setText("Completed successfully.")
         QMessageBox.information(self, "Success", "Completed successfully.")
@@ -1010,80 +1157,59 @@ class MainWindow(QMainWindow):
             self.current_preview_index += 1
             self._render_current_preview()
 
+    def _open_path(self, path_value: str | None, label: str = "file") -> None:
+        if not path_value:
+            QMessageBox.warning(self, "Nothing to open", f"No {label} is available yet.")
+            return
+
+        path = Path(path_value).expanduser().resolve()
+        if not path.exists():
+            QMessageBox.warning(self, "File not found", f"The {label} does not exist:\n{path}")
+            return
+
+        try:
+            if sys.platform.startswith("linux"):
+                subprocess.Popen(
+                    ["xdg-open", str(path)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                return
+
+            if sys.platform == "darwin":
+                subprocess.Popen(
+                    ["open", str(path)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                return
+
+            if os.name == "nt":
+                os.startfile(str(path))  # type: ignore[attr-defined]
+                return
+
+        except Exception as exc:
+            QMessageBox.critical(self, "Open failed", f"Could not open {label}:\n{path}\n\n{exc}")
+            return
+
+        QMessageBox.warning(self, "Open failed", f"Could not open {label}:\n{path}")
+
     def _open_output_folder(self) -> None:
-        if not self.last_output_dir:
-            return
-
-        path = Path(self.last_output_dir)
-        if not path.exists():
-            QMessageBox.warning(self, "Missing folder", "The output folder no longer exists.")
-            return
-
-        os.startfile(str(path))
-
+        self._open_path(self.last_output_dir, "output folder")
     def _open_pdf(self) -> None:
-        if not self.last_output_pdf:
-            return
-
-        path = Path(self.last_output_pdf)
-        if not path.exists():
-            QMessageBox.warning(self, "Missing file", "The PDF file no longer exists.")
-            return
-
-        os.startfile(str(path))
-
+        self._open_path(self.last_output_pdf, "PDF")
     def _open_docx(self) -> None:
-        if not self.last_output_docx:
-            return
-
-        path = Path(self.last_output_docx)
-        if not path.exists():
-            QMessageBox.warning(self, "Missing file", "The DOCX file no longer exists.")
-            return
-
-        os.startfile(str(path))
-
+        self._open_path(self.last_output_docx, "DOCX")
     def _open_markdown(self) -> None:
-        if not self.last_output_markdown:
-            return
-
-        path = Path(self.last_output_markdown)
-        if not path.exists():
-            QMessageBox.warning(self, "Missing file", "The Markdown file no longer exists.")
-            return
-
-        os.startfile(str(path))
-
+        self._open_path(self.last_output_markdown, "Markdown")
     def _open_signature_plan(self) -> None:
-        if not self.last_signature_plan:
-            return
-        path = Path(self.last_signature_plan)
-        if not path.exists():
-            QMessageBox.warning(self, "Missing file", "The signature plan file no longer exists.")
-            return
-        self._open_path(path)
-
+        self._open_path(self.last_signature_plan, "signature plan")
     def _open_signature_batches(self) -> None:
-        if not self.last_signature_batches:
-            return
-        path = Path(self.last_signature_batches)
-        if not path.exists():
-            QMessageBox.warning(self, "Missing file", "The signature batches file no longer exists.")
-            return
-        self._open_path(path)
-
+        self._open_path(self.last_signature_batches, "signature batches")
     def _open_imposed_pdf(self) -> None:
-        if not self.last_imposed_pdf:
-            return
-
-        path = Path(self.last_imposed_pdf)
-        if not path.exists():
-            QMessageBox.warning(self, "Missing file", "The imposed PDF file no longer exists.")
-            return
-
-        os.startfile(str(path))
-
-    # ChapterFOLD Patch 002: diagnostics support
+        self._open_path(self.last_imposed_pdf, "imposed PDF")
     def _chapterfold_collect_current_settings_for_diagnostics(self):
         """Best-effort settings capture for support reports.
 

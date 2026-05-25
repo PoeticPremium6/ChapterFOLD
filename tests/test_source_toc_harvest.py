@@ -96,3 +96,25 @@ def test_illustration_page_links_are_not_treated_as_chapters():
     """
 
     assert harvest_source_toc_entries(html) == []
+
+
+def test_harvest_gutenberg_chapter_colon_and_comma_labels():
+    html = """
+    <p class="toc">
+      <a href="#PREFACE">PREFACE.</a><br/>
+      <a href="#LIST_OF_ILLUSTRATIONS">List of Illustrations.</a><br/>
+      <a href="#Chapter_I">Chapter: I.,</a>
+      <a href="#CHAPTER_II">II.,</a>
+      <a href="#CHAPTER_III">III.,</a>
+      <a href="#CHAPTER_LXI">LXI.</a>
+    </p>
+    """
+
+    assert harvest_source_toc_entries(html) == [
+        "Preface",
+        "List of Illustrations",
+        "CHAPTER I",
+        "CHAPTER II",
+        "CHAPTER III",
+        "CHAPTER LXI",
+    ]

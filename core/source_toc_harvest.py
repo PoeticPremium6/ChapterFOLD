@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from bs4 import BeautifulSoup, Tag
 
-ROMAN_RE = re.compile(r"^[IVXLCDM]+\.?$", re.IGNORECASE)
+ROMAN_RE = re.compile(r"^[IVXLCDM]+[.,:]*$", re.IGNORECASE)
+CHAPTER_COLON_RE = re.compile(r"^CHAPTER\s*:\s*([IVXLCDM]+)[.,:]*$", re.IGNORECASE)
+CHAPTER_HREF_RE = re.compile(r"(?:^|[#/_-])chapter[_\-\s]*([ivxlcdm]+|\d+)\b", re.IGNORECASE)
 
 FRONT_REMAP = {
     "PREFACE": "Preface",
@@ -16,7 +18,7 @@ FRONT_REMAP = {
 
 
 def roman_to_int(value: str) -> int:
-    value = value.upper().strip().strip(".")
+    value = value.upper().strip().strip(".,:")
     values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
     total = 0
     prev = 0
@@ -30,9 +32,15 @@ def roman_to_int(value: str) -> int:
     return total
 
 
+def _chapter_from_href(href: str) -> str:
+    match = CHAPTER_HREF_RE.search(href or "")
+    if not match:
+        return ""
+    return match.group(1).upper()
+
+
 def _target_looks_like_chapter(target: str) -> bool:
-    target = (target or "").lower()
-    return any(token in target for token in ["chapter", "chap", "ch_", "ch-", "#c", "_c"])
+    return bool(_chapter_from_href(target))
 
 
 def _clean_source_toc_label(value: str, *, href: str = "") -> str:
@@ -44,17 +52,29 @@ def _clean_source_toc_label(value: str, *, href: str = "") -> str:
     if upper in FRONT_REMAP:
         return FRONT_REMAP[upper]
 
-    # Bare roman numerals are ambiguous: in illustrated books they are often
-    # page references in the List of Illustrations, not chapter numbers.
-    # Only convert them to chapters when the link target looks chapter-like.
+    href_chapter = _chapter_from_href(href)
+
+    # If the target is a chapter anchor, trust it. Gutenberg often uses labels
+    # like "Chapter: I.," or "II.," where the href is cleaner than the text.
+    if href_chapter and (
+        ROMAN_RE.match(value)
+        or CHAPTER_COLON_RE.match(value)
+        or upper.startswith("CHAPTER")
+    ):
+        return f"CHAPTER {href_chapter}"
+
+    chapter_colon = CHAPTER_COLON_RE.match(value)
+    if chapter_colon and href_chapter:
+        return f"CHAPTER {chapter_colon.group(1).upper()}"
+
     if ROMAN_RE.match(value):
-        if _target_looks_like_chapter(href):
-            return f"CHAPTER {value.strip('.').upper()}"
+        if href_chapter:
+            return f"CHAPTER {value.strip('.,:').upper()}"
         return ""
 
     if upper.startswith("CHAPTER "):
-        return upper.strip(" .")
-
+        return upper.strip(" .,:")
+        
     return ""
 
 
@@ -124,7 +144,6 @@ def _score_toc_candidate(tag: Tag, entries: list[str]) -> int:
 def harvest_source_toc_entries(html_fragment: str) -> list[str]:
     """Extract useful entries from the most likely source EPUB TOC block."""
     soup = BeautifulSoup(html_fragment or "", "html.parser")
-
     candidates: list[tuple[int, list[str]]] = []
 
     for tag in soup.find_all(["nav", "section", "div", "p", "ol", "ul"]):

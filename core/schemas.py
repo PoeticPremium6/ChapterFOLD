@@ -27,6 +27,8 @@ class ChapterfoldSettings:
     generate_clean_pdf: bool = True
     paragraph_spacing_mode: str = "traditional"
     contents_mode: str = "rebuild"
+    page_number_start_mode: str = "after-title-page"
+    front_matter_page_number_style: str = "hidden"
 
     page_size_preset: str = "default-trade"
     custom_trim_width_cm: Optional[float] = None
@@ -61,6 +63,14 @@ class ChapterfoldSettings:
         allowed_contents_modes = {"keep", "remove", "rebuild", "rebuild-paged"}
         if self.contents_mode not in allowed_contents_modes:
             raise ValueError(f"Unknown contents_mode: {self.contents_mode}")
+
+        allowed_page_number_start_modes = {"after-title-page", "main-text", "first-page", "none"}
+        if self.page_number_start_mode not in allowed_page_number_start_modes:
+            raise ValueError(f"Unknown page_number_start_mode: {self.page_number_start_mode}")
+
+        allowed_front_matter_page_number_styles = {"hidden", "roman-lower", "roman-upper", "arabic"}
+        if self.front_matter_page_number_style not in allowed_front_matter_page_number_styles:
+            raise ValueError(f"Unknown front_matter_page_number_style: {self.front_matter_page_number_style}")
 
         if self.signature_size <= 0:
             raise ValueError("signature_size must be positive.")
