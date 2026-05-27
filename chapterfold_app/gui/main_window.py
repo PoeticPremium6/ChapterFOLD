@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from core.font_catalog import FONT_CHOICES, get_font_choice
 
-from PySide6.QtCore import QThread, Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,6 +31,12 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtGui import QFont, QAction
 from core.diagnostics import build_diagnostic_report
+from core.page_ornaments import chapter_ornament_choices, ordered_page_ornament_choices, page_ornament_amount_choices, page_ornament_choices
+
+try:
+    from chapterfold_app.gui.batch_anthology_dialog import BatchAnthologyDialog
+except ModuleNotFoundError:
+    from gui.batch_anthology_dialog import BatchAnthologyDialog
 
 try:
     from chapterfold_app.gui.worker import Worker
@@ -214,6 +220,59 @@ QSplitter::handle:vertical {
 """
 
 
+class DropPathLineEdit(QLineEdit):
+    """Line edit that accepts EPUB/PDF paths by drag and drop."""
+
+    ACCEPTED_SUFFIXES = {".epub", ".pdf"}
+    multipleFilesDropped = Signal(list)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.setAcceptDrops(True)
+        self.setPlaceholderText("Choose or drag an EPUB/PDF file here")
+
+    @classmethod
+    def accepted_paths_from_urls(cls, urls) -> list[str]:
+        paths: list[str] = []
+        for url in urls:
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.suffix.lower() in cls.ACCEPTED_SUFFIXES:
+                paths.append(str(path))
+        return paths
+
+    @classmethod
+    def accepted_path_from_urls(cls, urls) -> str:
+        paths = cls.accepted_paths_from_urls(urls)
+        return paths[0] if paths else ""
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt method name
+        if self.accepted_paths_from_urls(event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt method name
+        if self.accepted_paths_from_urls(event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt method name
+        paths = self.accepted_paths_from_urls(event.mimeData().urls())
+        if not paths:
+            event.ignore()
+            return
+
+        if len(paths) == 1:
+            self.setText(paths[0])
+        else:
+            self.multipleFilesDropped.emit(paths)
+
+        event.acceptProposedAction()
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -226,7 +285,8 @@ class MainWindow(QMainWindow):
         self.thread: QThread | None = None
         self.worker: Worker | None = None
 
-        self.input_edit = QLineEdit()
+        self.input_edit = DropPathLineEdit()
+        self.input_edit.multipleFilesDropped.connect(self._handle_multiple_files_dropped)
         self.output_edit = QLineEdit()
 
         self.variant_combo = QComboBox()
@@ -269,6 +329,30 @@ class MainWindow(QMainWindow):
         self.front_matter_numbers_combo.addItem("Arabic (1, 2, 3)", "arabic")
         self.front_matter_numbers_combo.setToolTip("Optional front matter numbering; most useful when page numbers start at main text.")
 
+        self.page_ornament_amount_combo = QComboBox()
+        for key, label, description in page_ornament_amount_choices():
+            self.page_ornament_amount_combo.addItem(label, key)
+            self.page_ornament_amount_combo.setItemData(
+                self.page_ornament_amount_combo.count() - 1,
+                description,
+                Qt.ToolTipRole,
+            )
+        self.page_ornament_amount_combo.setToolTip(
+            "Choose how many ornaments appear around visible PDF page numbers."
+        )
+
+        self.chapter_ornament_combo = QComboBox()
+        for key, label, description in chapter_ornament_choices():
+            self.chapter_ornament_combo.addItem(label, key)
+            self.chapter_ornament_combo.setItemData(
+                self.chapter_ornament_combo.count() - 1,
+                description,
+                Qt.ToolTipRole,
+            )
+        self.chapter_ornament_combo.setToolTip(
+            "Optional decorative flourish below chapter headings."
+        )
+
         self.page_size_combo = QComboBox()
         self.page_size_combo.addItem("Default trade (6 x 9 in)", "default-trade")
         self.page_size_combo.addItem("A4", "a4")
@@ -279,6 +363,9 @@ class MainWindow(QMainWindow):
         self.page_size_combo.addItem("Trade 5 x 8 in", "trade-5x8")
         self.page_size_combo.addItem("Trade 6 x 9 in", "trade-6x9")
         self.page_size_combo.addItem("Custom size", "custom")
+        self.page_ornament_combo = QComboBox()
+        self._populate_page_ornament_combo()
+
         self.font_combo = QComboBox()
         for choice in FONT_CHOICES:
             self.font_combo.addItem(choice.dropdown_label, choice.key)
@@ -475,6 +562,19 @@ class MainWindow(QMainWindow):
         scroll.setWidget(widget)
         return scroll
 
+    def _populate_page_ornament_combo(self) -> None:
+        self.page_ornament_combo.clear()
+        for key, label, description in ordered_page_ornament_choices():
+            self.page_ornament_combo.addItem(label, key)
+            self.page_ornament_combo.setItemData(
+                self.page_ornament_combo.count() - 1,
+                description,
+                Qt.ToolTipRole,
+            )
+        self.page_ornament_combo.setToolTip(
+            "Optional decorative ornament around visible PDF page numbers."
+        )
+
     def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
@@ -536,7 +636,7 @@ class MainWindow(QMainWindow):
         layout.setVerticalSpacing(12)
 
         layout.addWidget(
-            self._hint_label("Choose the source EPUB or PDF and where the outputs should be saved."),
+            self._hint_label("Choose or drag the source EPUB/PDF and where the outputs should be saved."),
             0,
             0,
             1,
@@ -596,6 +696,18 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Front matter numbers"), row, 0)
         layout.addWidget(self.front_matter_numbers_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Page ornament"), row, 0)
+        layout.addWidget(self.page_ornament_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Ornament amount"), row, 0)
+        layout.addWidget(self.page_ornament_amount_combo, row, 1)
+        row += 1
+
+        layout.addWidget(QLabel("Chapter ornament"), row, 0)
+        layout.addWidget(self.chapter_ornament_combo, row, 1)
         row += 1
 
         layout.addWidget(QLabel("Output font"), row, 0)
@@ -734,6 +846,36 @@ class MainWindow(QMainWindow):
         self.margin_preset_combo.currentIndexChanged.connect(self._sync_layout_visibility)
         self.input_edit.textChanged.connect(self._sync_input_mode)
 
+    def _handle_multiple_files_dropped(self, paths: list[str]) -> None:
+        epub_paths = [path for path in paths if Path(path).suffix.lower() == ".epub"]
+        ignored = [path for path in paths if Path(path).suffix.lower() != ".epub"]
+
+        if not epub_paths:
+            QMessageBox.warning(
+                self,
+                "No EPUB files",
+                "Batch anthology mode currently supports multiple EPUB files only.",
+            )
+            return
+
+        self.status_label.setText(
+            f"Batch anthology mode: {len(epub_paths)} EPUB files detected."
+        )
+
+        if ignored:
+            self.log_box.appendPlainText(
+                f"Batch anthology ignored {len(ignored)} non-EPUB file(s)."
+            )
+
+        dialog = BatchAnthologyDialog(
+            epub_paths,
+            default_output_dir=self.output_edit.text().strip(),
+            parent=self,
+        )
+        dialog.buildCompleted.connect(self._on_batch_anthology_success)
+        self.batch_anthology_dialog = dialog
+        dialog.show()
+
     def _input_suffix(self) -> str:
         return Path(self.input_edit.text().strip()).suffix.lower()
 
@@ -761,6 +903,8 @@ class MainWindow(QMainWindow):
             self.contents_mode_combo,
             self.page_number_start_combo,
             self.front_matter_numbers_combo,
+            self.page_ornament_combo,
+            self.page_ornament_amount_combo,
             self.font_combo,
         ]:
             widget.setEnabled(epub_controls_enabled)
@@ -875,6 +1019,9 @@ class MainWindow(QMainWindow):
         contents_mode = self.contents_mode_combo.currentData() or "rebuild"
         page_number_start_mode = self.page_number_start_combo.currentData() or "after-title-page"
         front_matter_page_number_style = self.front_matter_numbers_combo.currentData() or "hidden"
+        page_ornament = self.page_ornament_combo.currentData() or "none"
+        page_ornament_amount = self.page_ornament_amount_combo.currentData() or "subtle"
+        chapter_ornament = self.chapter_ornament_combo.currentData() or "none"
         page_size_preset = self.page_size_combo.currentData()
         output_font_key = self.font_combo.currentData() or "classic-serif"
         margin_preset = self.margin_preset_combo.currentData()
@@ -939,6 +1086,9 @@ class MainWindow(QMainWindow):
             contents_mode=contents_mode,
             page_number_start_mode=page_number_start_mode,
             front_matter_page_number_style=front_matter_page_number_style,
+            page_ornament=page_ornament,
+            page_ornament_amount=page_ornament_amount,
+            chapter_ornament=chapter_ornament,
             imposition_mode=imposition_mode,
             imposed_pages_per_signature=imposed_pages_per_signature,
             binding_direction=binding_direction,
@@ -973,6 +1123,30 @@ class MainWindow(QMainWindow):
         return f"{value:+.2f} MB"
 
     def _build_results_text(self, payload: dict) -> str:
+        if payload.get("input_type") == "batch-anthology":
+            lines = [
+                "Input type: Batch anthology",
+                f"Title: {payload.get('title', '')}",
+                f"Author/editor: {payload.get('author', '')}",
+                f"Markdown: {payload.get('markdown_path', '')}",
+                f"Manifest: {payload.get('manifest_json_path', '')}",
+                "",
+                "Inputs:",
+            ]
+
+            for item in payload.get("inputs", []):
+                lines.append(
+                    f"- {item.get('title', '')} by {item.get('author', '')} "
+                    f"({item.get('section_count', 0)} sections)"
+                )
+
+            if payload.get("warnings"):
+                lines.extend(["", "Warnings:"])
+                for warning in payload.get("warnings", []):
+                    lines.append(f"- {warning}")
+
+            return "\n".join(lines)
+
         if payload.get("input_type") == "pdf":
             lines = [
                 "Input type: PDF",
@@ -1008,6 +1182,9 @@ class MainWindow(QMainWindow):
             f"Contents mode: {payload.get('contents_mode', '')}",
             f"Page number start: {payload.get('page_number_start_mode', '')}",
             f"Front matter numbers: {payload.get('front_matter_page_number_style', '')}",
+            f"Page ornament: {payload.get('page_ornament', '')}",
+            f"Page ornament amount: {payload.get('page_ornament_amount', '')}",
+            f"Chapter ornament: {payload.get('chapter_ornament', '')}",
             f"Page size: {payload.get('page_size_preset_label', '')}",
             f"Trim size: {payload.get('trim_width_cm', '')} x {payload.get('trim_height_cm', '')} cm",
             f"Margins: {payload.get('margin_preset_label', '')}",
@@ -1080,6 +1257,23 @@ class MainWindow(QMainWindow):
         ])
 
         return "\n".join(lines)
+
+    def _on_batch_anthology_success(self, payload: dict) -> None:
+        self.last_output_dir = payload.get("output_dir", "")
+        self.last_output_markdown = payload.get("markdown_path", "")
+        self.last_output_pdf = ""
+        self.last_output_docx = ""
+        self.last_imposed_pdf = ""
+        self.last_signature_plan = ""
+
+        self.results_box.setPlainText(self._build_results_text(payload))
+        self.open_output_btn.setEnabled(bool(self.last_output_dir))
+        self.open_markdown_btn.setEnabled(bool(self.last_output_markdown))
+        self.open_pdf_btn.setEnabled(False)
+        self.open_docx_btn.setEnabled(False)
+        self.open_imposed_btn.setEnabled(False)
+        self.open_signature_plan_btn.setEnabled(False)
+        self.status_label.setText("Batch anthology build complete.")
 
     def _on_success(self, payload: dict) -> None:
         self.last_output_dir = payload.get("output_dir", "")

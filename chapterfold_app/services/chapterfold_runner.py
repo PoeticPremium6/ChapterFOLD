@@ -157,6 +157,9 @@ def build_layout_settings(
     contents_mode: str = "rebuild",
     page_number_start_mode: str = "after-title-page",
     front_matter_page_number_style: str = "hidden",
+    page_ornament: str = "none",
+    page_ornament_amount: str = "subtle",
+    chapter_ornament: str = "none",
 ) -> LayoutSettings:
     layout = LayoutSettings(
         paragraph_spacing_mode=paragraph_spacing_mode,
@@ -167,6 +170,9 @@ def build_layout_settings(
     layout.contents_mode = contents_mode
     layout.page_number_start_mode = page_number_start_mode
     layout.front_matter_page_number_style = front_matter_page_number_style
+    layout.page_ornament = page_ornament
+    layout.page_ornament_amount = page_ornament_amount
+    layout.chapter_ornament = chapter_ornament
 
     size_key = (page_size_preset or "default-trade").strip().lower()
     if size_key == "custom":
@@ -367,6 +373,9 @@ def run_processing(
     contents_mode: str = "rebuild",
     page_number_start_mode: str = "after-title-page",
     front_matter_page_number_style: str = "hidden",
+    page_ornament: str = "none",
+    page_ornament_amount: str = "subtle",
+    chapter_ornament: str = "none",
     imposition_mode: str,
     imposed_pages_per_signature: int,
     binding_direction: str,
@@ -397,6 +406,9 @@ def run_processing(
         contents_mode=contents_mode,
         page_number_start_mode=page_number_start_mode,
         front_matter_page_number_style=front_matter_page_number_style,
+        page_ornament=page_ornament,
+        page_ornament_amount=page_ornament_amount,
+        chapter_ornament=chapter_ornament,
     )
 
     create_imposed_pdf = (imposition_mode or "none").strip().lower() == "also"
@@ -445,6 +457,9 @@ def run_processing(
     log(f"Contents mode: {contents_mode}")
     log(f"Page number start: {page_number_start_mode}")
     log(f"Front matter numbers: {front_matter_page_number_style}")
+    log(f"Page ornament: {page_ornament}")
+    log(f"Page ornament amount: {page_ornament_amount}")
+    log(f"Chapter ornament: {chapter_ornament}")
     log(f"Page size: {describe_page_size_preset(page_size_preset)}")
     log(f"Trim size: {layout_settings.trim_width_cm:.2f} cm x {layout_settings.trim_height_cm:.2f} cm")
     log(f"Margin preset: {describe_margin_preset(margin_preset)}")
@@ -628,6 +643,9 @@ def run_processing(
         "contents_mode": contents_mode,
         "page_number_start_mode": page_number_start_mode,
         "front_matter_page_number_style": front_matter_page_number_style,
+        "page_ornament": page_ornament,
+        "page_ornament_amount": page_ornament_amount,
+        "chapter_ornament": chapter_ornament,
         "output_font_key": output_font_key,
         "output_font_label": get_font_choice(output_font_key).label,
         "page_size_preset": page_size_preset,

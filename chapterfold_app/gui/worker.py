@@ -43,6 +43,9 @@ class Worker(QObject):
         contents_mode: str = "rebuild",
         page_number_start_mode: str = "after-title-page",
         front_matter_page_number_style: str = "hidden",
+        page_ornament: str = "none",
+        page_ornament_amount: str = "subtle",
+        chapter_ornament: str = "none",
         imposition_mode: str = "none",
         imposed_pages_per_signature: int = 16,
         binding_direction: str = "ltr",
@@ -70,6 +73,9 @@ class Worker(QObject):
         self.contents_mode = contents_mode
         self.page_number_start_mode = page_number_start_mode
         self.front_matter_page_number_style = front_matter_page_number_style
+        self.page_ornament = page_ornament
+        self.page_ornament_amount = page_ornament_amount
+        self.chapter_ornament = chapter_ornament
         self.imposition_mode = imposition_mode
         self.imposed_pages_per_signature = imposed_pages_per_signature
         self.binding_direction = binding_direction
@@ -167,6 +173,9 @@ class Worker(QObject):
                 contents_mode=self.contents_mode,
                 page_number_start_mode=self.page_number_start_mode,
                 front_matter_page_number_style=self.front_matter_page_number_style,
+                page_ornament=self.page_ornament,
+                page_ornament_amount=self.page_ornament_amount,
+                chapter_ornament=self.chapter_ornament,
                 imposition_mode=self.imposition_mode,
                 imposed_pages_per_signature=self.imposed_pages_per_signature,
                 binding_direction=self.binding_direction,

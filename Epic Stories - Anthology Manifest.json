@@ -1,0 +1,38 @@
+{
+  "success": true,
+  "title": "Epic Stories",
+  "author": "Various Authors",
+  "input_count": 4,
+  "output_markdown": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Epic Stories - Anthology.md",
+  "warnings": [],
+  "inputs": [
+    {
+      "input_path": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Alice in Wonderland.epub",
+      "title": "Alice's Adventures in Wonderland",
+      "author": "Lewis Carroll",
+      "section_count": 12,
+      "char_count": 143086
+    },
+    {
+      "input_path": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Grimms Fairy Tales.epub",
+      "title": "Grimms' Fairy Tales",
+      "author": "Jacob Grimm",
+      "section_count": 62,
+      "char_count": 518063
+    },
+    {
+      "input_path": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Moby Dick.epub",
+      "title": "Moby Dick; Or, The Whale",
+      "author": "Herman Melville",
+      "section_count": 27,
+      "char_count": 1212635
+    },
+    {
+      "input_path": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Odyssey.epub",
+      "title": "The Odyssey / Rendered into English prose for the use of those who cannot read the original",
+      "author": "Homer",
+      "section_count": 14,
+      "char_count": 279569
+    }
+  ]
+}

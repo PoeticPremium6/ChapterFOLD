@@ -46,6 +46,9 @@ def build_settings(args: argparse.Namespace) -> ChapterfoldSettings:
         "contents_mode": getattr(args, "contents_mode", None),
         "page_number_start_mode": getattr(args, "page_number_start_mode", None),
         "front_matter_page_number_style": getattr(args, "front_matter_page_number_style", None),
+        "page_ornament": getattr(args, "page_ornament", None),
+        "page_ornament_amount": getattr(args, "page_ornament_amount", None),
+        "chapter_ornament": getattr(args, "chapter_ornament", None),
         "margin_preset": args.margin_preset,
         "page_size_preset": args.page_size_preset,
         "create_imposed_pdf": True if args.impose else None,
@@ -85,6 +88,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--contents-mode", choices=["keep", "remove", "rebuild", "rebuild-paged"], default=None, help="How to handle source table of contents")
     parser.add_argument("--page-number-start", dest="page_number_start_mode", choices=["after-title-page", "main-text", "first-page", "none"], default=None, help="Where visible PDF page numbers should begin")
     parser.add_argument("--front-matter-numbers", dest="front_matter_page_number_style", choices=["hidden", "roman-lower", "roman-upper", "arabic"], default=None, help="How to number front matter when page numbers start at main text")
+    parser.add_argument("--page-ornament-amount", dest="page_ornament_amount", choices=["subtle", "balanced", "ornate"], default=None, help="How many ornaments appear around visible page numbers")
+    parser.add_argument("--page-ornament", dest="page_ornament", choices=['none', 'classic-rule', 'botanical-leaf', 'floral-corner', 'gothic-flourish', 'storybook', 'vine', 'laurel', 'victorian-dots', 'celestial', 'rose', 'ivy', 'acanthus', 'minimal-divider', 'poetic-vine', 'moon-garden', 'rose-window', 'ivy-thorn', 'asterism', 'bookbinder-rule'], default=None, help="Decorative ornament around visible PDF page numbers")
+    parser.add_argument("--chapter-ornament", dest="chapter_ornament", choices=['none', 'classic-rule', 'botanical-divider', 'poetic-vine', 'moon-garden', 'rose-window', 'bookbinder-rule'], default=None, help="Decorative ornament below chapter headings")
     parser.add_argument("--page-size-preset", choices=["default-trade", "a4", "a5", "a6", "letter", "half-letter", "trade-5x8", "trade-6x9", "custom"], default=None)
     parser.add_argument("--custom-trim-width-cm", type=float, default=None)
     parser.add_argument("--custom-trim-height-cm", type=float, default=None)

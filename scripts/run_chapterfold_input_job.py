@@ -35,7 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--page-number-start", dest="page_number_start_mode", choices=["after-title-page", "main-text", "first-page", "none"], default=None)
     parser.add_argument("--front-matter-numbers", dest="front_matter_page_number_style", choices=["hidden", "roman-lower", "roman-upper", "arabic"], default=None)
+    parser.add_argument("--page-ornament-amount", dest="page_ornament_amount", choices=["subtle", "balanced", "ornate"], default=None, help="How many ornaments appear around visible page numbers")
+    parser.add_argument("--page-ornament", dest="page_ornament", choices=['none', 'classic-rule', 'botanical-leaf', 'floral-corner', 'gothic-flourish', 'storybook', 'vine', 'laurel', 'victorian-dots', 'celestial', 'rose', 'ivy', 'acanthus', 'minimal-divider', 'poetic-vine', 'moon-garden', 'rose-window', 'ivy-thorn', 'asterism', 'bookbinder-rule'], default=None, help="Decorative ornament around visible PDF page numbers")
 
+    parser.add_argument("--chapter-ornament", dest="chapter_ornament", choices=['none', 'classic-rule', 'botanical-divider', 'poetic-vine', 'moon-garden', 'rose-window', 'bookbinder-rule'], default=None, help="Decorative ornament below chapter headings")
     parser.add_argument("--page-size-preset", choices=["default-trade", "a4", "a5", "a6", "letter", "half-letter", "trade-5x8", "trade-6x9", "custom"], default=None)
     parser.add_argument("--custom-trim-width-cm", type=float, default=None)
     parser.add_argument("--custom-trim-height-cm", type=float, default=None)
@@ -66,6 +69,9 @@ def build_settings(args: argparse.Namespace) -> ChapterfoldSettings:
         "contents_mode": args.contents_mode,
         "page_number_start_mode": args.page_number_start_mode,
         "front_matter_page_number_style": args.front_matter_page_number_style,
+        "page_ornament": args.page_ornament,
+        "page_ornament_amount": args.page_ornament_amount,
+        "chapter_ornament": args.chapter_ornament,
         "page_size_preset": args.page_size_preset,
         "custom_trim_width_cm": args.custom_trim_width_cm,
         "custom_trim_height_cm": args.custom_trim_height_cm,

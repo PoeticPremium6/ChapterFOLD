@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,6 +27,49 @@ from PySide6.QtWidgets import (
 )
 
 
+class DropMarkdownLineEdit(QLineEdit):
+    """Line edit that accepts a single Markdown file by drag and drop."""
+
+    ACCEPTED_SUFFIXES = {".md", ".markdown", ".txt"}
+    markdownDropped = Signal(str)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.setAcceptDrops(True)
+        self.setPlaceholderText("Select or drag a ChapterFOLD Editable.md file here...")
+
+    @classmethod
+    def accepted_path_from_urls(cls, urls) -> str:
+        for url in urls:
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.suffix.lower() in cls.ACCEPTED_SUFFIXES:
+                return str(path)
+        return ""
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if self.accepted_path_from_urls(event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if self.accepted_path_from_urls(event.mimeData().urls()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        path = self.accepted_path_from_urls(event.mimeData().urls())
+        if path:
+            self.setText(path)
+            self.markdownDropped.emit(path)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+
 class MarkdownRenderDialog(QDialog):
     """Render an edited ChapterFOLD Markdown file back into book outputs."""
 
@@ -44,8 +87,8 @@ class MarkdownRenderDialog(QDialog):
         self.last_output_files: list[Path] = []
         self.last_output_dir: Path | None = None
 
-        self.markdown_path = QLineEdit()
-        self.markdown_path.setPlaceholderText("Select a ChapterFOLD Editable.md file...")
+        self.markdown_path = DropMarkdownLineEdit()
+        self.markdown_path.markdownDropped.connect(self.set_markdown_path)
 
         self.output_dir = QLineEdit()
         self.output_dir.setPlaceholderText("Select an output folder...")
@@ -160,6 +203,8 @@ class MarkdownRenderDialog(QDialog):
         self.markdown_path.setText(str(path))
         if not self.output_dir.text().strip():
             self.output_dir.setText(str(path.parent / f"{path.stem}_rendered"))
+        self.log.append(f"Markdown selected: {path}")
+        self.setWindowTitle(f"ChapterFOLD Markdown Studio — {path.name}")
 
     def choose_markdown(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

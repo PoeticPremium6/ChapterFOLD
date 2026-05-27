@@ -29,6 +29,9 @@ class ChapterfoldSettings:
     contents_mode: str = "rebuild"
     page_number_start_mode: str = "after-title-page"
     front_matter_page_number_style: str = "hidden"
+    page_ornament: str = "none"
+    page_ornament_amount: str = "subtle"
+    chapter_ornament: str = "none"
 
     page_size_preset: str = "default-trade"
     custom_trim_width_cm: Optional[float] = None
@@ -71,6 +74,26 @@ class ChapterfoldSettings:
         allowed_front_matter_page_number_styles = {"hidden", "roman-lower", "roman-upper", "arabic"}
         if self.front_matter_page_number_style not in allowed_front_matter_page_number_styles:
             raise ValueError(f"Unknown front_matter_page_number_style: {self.front_matter_page_number_style}")
+
+        allowed_page_ornaments = {'none', 'classic-rule', 'botanical-leaf', 'floral-corner', 'gothic-flourish', 'storybook', 'vine', 'laurel', 'victorian-dots', 'celestial', 'rose', 'ivy', 'acanthus', 'minimal-divider', 'poetic-vine', 'moon-garden', 'rose-window', 'ivy-thorn', 'asterism', 'bookbinder-rule'}
+        if self.page_ornament not in allowed_page_ornaments:
+            raise ValueError(f"Unknown page_ornament: {self.page_ornament}")
+
+        allowed_page_ornament_amounts = {"subtle", "balanced", "ornate"}
+        if self.page_ornament_amount not in allowed_page_ornament_amounts:
+            raise ValueError(f"Unknown page_ornament_amount: {self.page_ornament_amount}")
+
+        allowed_chapter_ornaments = {
+            "none",
+            "classic-rule",
+            "botanical-divider",
+            "poetic-vine",
+            "moon-garden",
+            "rose-window",
+            "bookbinder-rule",
+        }
+        if self.chapter_ornament not in allowed_chapter_ornaments:
+            raise ValueError(f"Unknown chapter_ornament: {self.chapter_ornament}")
 
         if self.signature_size <= 0:
             raise ValueError("signature_size must be positive.")

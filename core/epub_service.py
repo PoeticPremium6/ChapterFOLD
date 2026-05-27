@@ -23,6 +23,7 @@ from docx.shared import Cm, Pt
 from core.gutenberg_inline_trim import trim_gutenberg_boilerplate_from_sections
 from core.font_policy import UNICODE_PDF_FONT_STACK, apply_docx_unicode_font, apply_docx_run_unicode_fallback
 from core.page_numbering import build_page_number_css
+from core.page_ornaments import build_chapter_ornament_css
 from core.contents_mode import should_generate_contents, should_strip_source_contents
 from core.epub_toc_cleanup import strip_original_toc_blocks
 from core.generated_toc import prepend_generated_toc_section
@@ -57,6 +58,9 @@ class LayoutSettings:
     contents_mode: str = "rebuild"
     page_number_start_mode: str = "after-title-page"
     front_matter_page_number_style: str = "hidden"
+    page_ornament: str = "none"
+    page_ornament_amount: str = "subtle"
+    chapter_ornament: str = "none"
 
 
 @dataclass
@@ -1192,6 +1196,11 @@ def build_css(settings: LayoutSettings) -> str:
     page_number_css = build_page_number_css(
         getattr(settings, "page_number_start_mode", "after-title-page"),
         getattr(settings, "front_matter_page_number_style", "hidden"),
+        getattr(settings, "page_ornament", "none"),
+        getattr(settings, "page_ornament_amount", "subtle"),
+    )
+    chapter_ornament_css = build_chapter_ornament_css(
+        getattr(settings, "chapter_ornament", "none")
     )
     mode = (settings.paragraph_spacing_mode or "traditional").strip().lower()
 
@@ -1296,6 +1305,7 @@ html {{
 }}
 
 {page_number_css}
+{chapter_ornament_css}
 
 body {{
   margin: 0;

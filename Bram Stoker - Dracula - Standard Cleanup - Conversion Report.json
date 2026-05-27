@@ -1,0 +1,72 @@
+{
+  "input_epub": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Dracula.epub",
+  "title": "Dracula",
+  "author": "Bram Stoker",
+  "gutenberg_report": {
+    "gutenberg_detected": true,
+    "selection_applied": true,
+    "total_html_items": 33,
+    "selected_html_items": 30,
+    "dropped_html_items": 3,
+    "total_text_chars": 928634,
+    "selected_text_chars": 908191,
+    "selected_retention_ratio": 0.978,
+    "selected_hrefs": [
+      "7599939443149237915_345-h-2.htm.html",
+      "7599939443149237915_345-h-3.htm.html",
+      "7599939443149237915_345-h-4.htm.html",
+      "7599939443149237915_345-h-5.htm.html",
+      "7599939443149237915_345-h-6.htm.html",
+      "7599939443149237915_345-h-7.htm.html",
+      "7599939443149237915_345-h-8.htm.html",
+      "7599939443149237915_345-h-9.htm.html",
+      "7599939443149237915_345-h-10.htm.html",
+      "7599939443149237915_345-h-11.htm.html",
+      "7599939443149237915_345-h-12.htm.html",
+      "7599939443149237915_345-h-13.htm.html",
+      "7599939443149237915_345-h-14.htm.html",
+      "7599939443149237915_345-h-15.htm.html",
+      "7599939443149237915_345-h-16.htm.html",
+      "7599939443149237915_345-h-17.htm.html",
+      "7599939443149237915_345-h-18.htm.html",
+      "7599939443149237915_345-h-19.htm.html",
+      "7599939443149237915_345-h-20.htm.html",
+      "7599939443149237915_345-h-21.htm.html",
+      "7599939443149237915_345-h-22.htm.html",
+      "7599939443149237915_345-h-23.htm.html",
+      "7599939443149237915_345-h-24.htm.html",
+      "7599939443149237915_345-h-25.htm.html",
+      "7599939443149237915_345-h-26.htm.html",
+      "7599939443149237915_345-h-27.htm.html",
+      "7599939443149237915_345-h-28.htm.html",
+      "7599939443149237915_345-h-29.htm.html",
+      "7599939443149237915_345-h-30.htm.html",
+      "wrap0000.html"
+    ],
+    "dropped_hrefs": [
+      "7599939443149237915_345-h-0.htm.html",
+      "7599939443149237915_345-h-1.htm.html",
+      "7599939443149237915_345-h-31.htm.html"
+    ],
+    "drop_reasons_by_href": {
+      "7599939443149237915_345-h-0.htm.html": "front_gutenberg_notice_or_contents",
+      "7599939443149237915_345-h-1.htm.html": "front_gutenberg_notice_or_contents",
+      "7599939443149237915_345-h-31.htm.html": "gutenberg_end_license"
+    },
+    "risk_flags": [],
+    "warnings": []
+  },
+  "cleanup_retention_report": {
+    "raw_section_text_chars": 833865,
+    "selector_selected_text_chars": 908191,
+    "selector_image_inflated": false,
+    "retention_denominator_chars": 908191,
+    "cleaned_text_chars": 836937,
+    "cleanup_retention_ratio": 0.9215,
+    "gutenberg_detected": true,
+    "risk_flags": [],
+    "warnings": [],
+    "failed": false,
+    "fallback_attempted": false
+  }
+}

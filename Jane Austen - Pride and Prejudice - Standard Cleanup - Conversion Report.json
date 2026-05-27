@@ -1,0 +1,42 @@
+{
+  "input_epub": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Pride and Prejudice.epub",
+  "title": "Pride and Prejudice",
+  "author": "Jane Austen",
+  "gutenberg_report": {
+    "gutenberg_detected": true,
+    "selection_applied": true,
+    "total_html_items": 18,
+    "selected_html_items": 17,
+    "dropped_html_items": 1,
+    "total_text_chars": 44693439,
+    "selected_text_chars": 44675085,
+    "selected_retention_ratio": 0.9996,
+    "selected_hrefs": [
+      "7910875783089588439_1342-h-0.htm.html",
+      "7910875783089588439_1342-h-1.htm.html",
+      "7910875783089588439_1342-h-2.htm.html",
+      "7910875783089588439_1342-h-3.htm.html",
+      "7910875783089588439_1342-h-4.htm.html",
+      "7910875783089588439_1342-h-5.htm.html",
+      "7910875783089588439_1342-h-6.htm.html",
+      "7910875783089588439_1342-h-7.htm.html",
+      "7910875783089588439_1342-h-8.htm.html",
+      "7910875783089588439_1342-h-9.htm.html",
+      "7910875783089588439_1342-h-10.htm.html",
+      "7910875783089588439_1342-h-11.htm.html",
+      "7910875783089588439_1342-h-12.htm.html",
+      "7910875783089588439_1342-h-13.htm.html",
+      "7910875783089588439_1342-h-14.htm.html",
+      "7399421126855284922_cover.jpg.id-1034307504931964562.wrap-0.html.html",
+      "wrap0000.html"
+    ],
+    "dropped_hrefs": [
+      "7910875783089588439_1342-h-15.htm.html"
+    ],
+    "drop_reasons_by_href": {
+      "7910875783089588439_1342-h-15.htm.html": "gutenberg_end_license"
+    },
+    "risk_flags": [],
+    "warnings": []
+  }
+}
