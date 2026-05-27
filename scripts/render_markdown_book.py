@@ -10,6 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.markdown_sanitizer import sanitize_chapterfold_markdown_for_render
+
+import argparse
+import json
+
 from core.markdown_book_renderer import render_markdown_book
 
 

@@ -38,5 +38,18 @@
     },
     "risk_flags": [],
     "warnings": []
+  },
+  "cleanup_retention_report": {
+    "raw_section_text_chars": 714141,
+    "selector_selected_text_chars": 44675085,
+    "selector_image_inflated": true,
+    "retention_denominator_chars": 714141,
+    "cleaned_text_chars": 320582,
+    "cleanup_retention_ratio": 0.4489,
+    "gutenberg_detected": true,
+    "risk_flags": [],
+    "warnings": [],
+    "failed": false,
+    "fallback_attempted": false
   }
 }

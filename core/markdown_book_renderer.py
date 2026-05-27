@@ -11,6 +11,8 @@ horizontal rules, simple emphasis, and fenced/preformatted blocks.
 """
 from __future__ import annotations
 
+from core.markdown_sanitizer import sanitize_chapterfold_markdown_for_render
+
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path

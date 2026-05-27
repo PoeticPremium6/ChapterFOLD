@@ -1,0 +1,38 @@
+{
+  "success": true,
+  "title": "Fairy Tales",
+  "author": "Various Authors",
+  "input_count": 2,
+  "output_markdown": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/Fairy Tales - Anthology.md",
+  "externalized_image_count": 0,
+  "externalized_image_files": [],
+  "warnings": [],
+  "inputs": [
+    {
+      "input_path": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Alice in Wonderland.epub",
+      "title": "Alice's Adventures in Wonderland",
+      "author": "Lewis Carroll",
+      "section_count": 12,
+      "char_count": 143086,
+      "image_marker_count": 0,
+      "image_asset_count": 2,
+      "image_asset_files": [
+        "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/fairy-tales-source-1-assets/1356467873801507220_cover.jpg",
+        "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/fairy-tales-source-1-assets/manifest.json"
+      ]
+    },
+    {
+      "input_path": "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/tests/fixtures/gutenberg/raw/Grimms Fairy Tales.epub",
+      "title": "Grimms' Fairy Tales",
+      "author": "Jacob Grimm",
+      "section_count": 62,
+      "char_count": 518063,
+      "image_marker_count": 0,
+      "image_asset_count": 2,
+      "image_asset_files": [
+        "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/fairy-tales-source-2-assets/912440629165101223_2591-cover.png",
+        "/home/poeticpremium/Desktop/BioStudio/Github/ChapterFOLD/fairy-tales-source-2-assets/manifest.json"
+      ]
+    }
+  ]
+}
