@@ -94,17 +94,42 @@ def build_signature_settings(
 
 def signature_sheet_pairs(
     pages_per_signature: int,
+    *,
+    binding_direction: str = "ltr",
 ) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """Return imposed sheet-side page pairs for one signature.
+
+    Pairs are returned as ((front_left, front_right), (back_left, back_right))
+    using 1-based page numbers local to a signature.
+
+    For a 16-page LTR signature, the first sheet is:
+    front: 16 | 1
+    back:   2 | 15
+
+    For a 16-page RTL signature, the first sheet is mirrored:
+    front: 1 | 16
+    back:  15 | 2
+    """
+
     if pages_per_signature % 4 != 0:
         raise ValueError("Pages per signature must be a multiple of 4")
+
+    direction = (binding_direction or "ltr").strip().lower()
+    if direction not in {"ltr", "rtl"}:
+        raise ValueError("Binding direction must be 'ltr' or 'rtl'")
 
     sheets: list[tuple[tuple[int, int], tuple[int, int]]] = []
     low = 1
     high = pages_per_signature
 
     while low < high:
-        front = (high, low)
-        back = (low + 1, high - 1)
+        if direction == "rtl":
+            front = (low, high)
+            back = (high - 1, low + 1)
+        else:
+            front = (high, low)
+            back = (low + 1, high - 1)
+
         sheets.append((front, back))
         low += 2
         high -= 2
@@ -136,29 +161,26 @@ def get_page_or_blank(
 
 
 def create_sheet_side(
-    first_page: PageObject,
-    second_page: PageObject,
+    left_page: PageObject,
+    right_page: PageObject,
     *,
     binding_direction: str,
 ) -> PageObject:
     """
     Create one landscape sheet side from two portrait pages.
 
-    For left-to-right binding, page order is left then right.
-    For right-to-left binding, the side is mirrored.
+    Page order is already resolved by signature_sheet_pairs().
+    This function always places the first argument on the left and the
+    second argument on the right.
     """
-    w = float(first_page.mediabox.width)
-    h = float(first_page.mediabox.height)
+    direction = (binding_direction or "ltr").strip().lower()
+    if direction not in {"ltr", "rtl"}:
+        raise ValueError("Binding direction must be 'ltr' or 'rtl'")
+
+    w = float(left_page.mediabox.width)
+    h = float(left_page.mediabox.height)
 
     sheet = PageObject.create_blank_page(width=w * 2, height=h)
-
-    if binding_direction == "rtl":
-        left_page = second_page
-        right_page = first_page
-    else:
-        left_page = first_page
-        right_page = second_page
-
     sheet.merge_transformed_page(left_page, Transformation().translate(tx=0, ty=0))
     sheet.merge_transformed_page(right_page, Transformation().translate(tx=w, ty=0))
     return sheet
@@ -206,7 +228,10 @@ def impose_pdf(
         )
 
     template_page = reader.pages[0]
-    per_signature_sheets = signature_sheet_pairs(settings.pages_per_signature)
+    per_signature_sheets = signature_sheet_pairs(
+        settings.pages_per_signature,
+        binding_direction=settings.binding_direction,
+    )
 
     for sig_start in range(1, padded_total + 1, settings.pages_per_signature):
         for (front_left_local, front_right_local), (back_left_local, back_right_local) in per_signature_sheets:

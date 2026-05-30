@@ -16,24 +16,41 @@ import traceback
 from typing import Any, Mapping
 
 
-PACKAGE_NAMES = [
-    "PySide6",
-    "ebooklib",
-    "weasyprint",
-    "pypdf",
-    "python-docx",
-    "beautifulsoup4",
-    "lxml",
+PACKAGE_CHECKS = [
+    ("PySide6", "PySide6", "PySide6"),
+    ("ebooklib", "ebooklib", "EbookLib"),
+    ("weasyprint", "weasyprint", "weasyprint"),
+    ("pypdf", "pypdf", "pypdf"),
+    ("python-docx", "docx", "python-docx"),
+    ("beautifulsoup4", "bs4", "beautifulsoup4"),
+    ("lxml", "lxml", "lxml"),
 ]
 
 
-def _package_version(name: str) -> str:
+def _package_version(import_name: str, distribution_name: str | None = None) -> str:
+    """Return useful package status in source and frozen/PyInstaller builds.
+
+    PyInstaller builds may not include distribution metadata even when a module
+    is bundled and importable. Prefer importability, then include version
+    metadata when available.
+    """
+
+    distribution_name = distribution_name or import_name
+
     try:
-        return importlib.metadata.version(name)
+        __import__(import_name)
+    except Exception as exc:
+        return f"not importable ({exc.__class__.__name__}: {exc})"
+
+    try:
+        version = importlib.metadata.version(distribution_name)
+        return f"OK {version}"
     except importlib.metadata.PackageNotFoundError:
-        return "not installed"
+        if getattr(sys, "frozen", False):
+            return "OK bundled"
+        return "OK importable, version metadata unavailable"
     except Exception as exc:  # pragma: no cover - defensive only
-        return f"unknown ({exc.__class__.__name__})"
+        return f"OK importable, version check failed ({exc.__class__.__name__})"
 
 
 def get_environment_info() -> dict[str, Any]:
@@ -48,7 +65,7 @@ def get_environment_info() -> dict[str, Any]:
         "machine": platform.machine(),
         "cwd": str(Path.cwd()),
         "virtual_env": os.environ.get("VIRTUAL_ENV", ""),
-        "packages": {name: _package_version(name) for name in PACKAGE_NAMES},
+        "packages": {label: _package_version(import_name, distribution_name) for label, import_name, distribution_name in PACKAGE_CHECKS},
     }
 
 
