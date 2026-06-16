@@ -174,3 +174,64 @@ def build_diagnostic_report(
     lines.append("")
     lines.append("Privacy note: this report records filenames/settings/environment only; it does not include book contents.")
     return "\n".join(lines).rstrip() + "\n"
+
+# --- Frozen/package diagnostics compatibility guard ---
+# PyInstaller/frozen apps may bundle importable modules without preserving
+# importlib.metadata distribution records. Diagnostics should therefore prefer
+# module importability over package metadata.
+
+_CHAPTERFOLD_PACKAGE_CHECKS = (
+    ("PySide6", "PySide6", "PySide6"),
+    ("ebooklib", "ebooklib", "EbookLib"),
+    ("weasyprint", "weasyprint", "weasyprint"),
+    ("pypdf", "pypdf", "pypdf"),
+    ("python-docx", "docx", "python-docx"),
+    ("beautifulsoup4", "bs4", "beautifulsoup4"),
+    ("lxml", "lxml", "lxml"),
+)
+
+
+def _chapterfold_package_status(import_name: str, distribution_name: str | None = None) -> str:
+    import sys as _sys
+    from importlib import metadata as _metadata
+
+    try:
+        module = __import__(import_name)
+    except Exception:
+        return "not installed"
+
+    try:
+        return _metadata.version(distribution_name or import_name)
+    except _metadata.PackageNotFoundError:
+        bundled = bool(getattr(_sys, "frozen", False))
+        module_version = getattr(module, "__version__", None)
+
+        if module_version:
+            return str(module_version)
+
+        if bundled:
+            return "OK bundled"
+
+        return "OK importable, version metadata unavailable"
+    except Exception:
+        return "OK importable, version metadata unavailable"
+
+
+_chapterfold_legacy_get_environment_info = get_environment_info
+
+
+def get_environment_info():
+    info = _chapterfold_legacy_get_environment_info()
+
+    package_status = {
+        label: _chapterfold_package_status(import_name, distribution_name)
+        for label, import_name, distribution_name in _CHAPTERFOLD_PACKAGE_CHECKS
+    }
+
+    if isinstance(info, dict):
+        info["packages"] = package_status
+    elif hasattr(info, "packages"):
+        setattr(info, "packages", package_status)
+
+    return info
+

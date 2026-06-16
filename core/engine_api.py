@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from core.engine_errors import friendly_error_from_exception
-from core.job import run_chapterfold_job
+from core.job import run_chapterfold_job as _legacy_run_chapterfold_job
+from core.schemas import ChapterfoldJobInput, ChapterfoldSettings
 from core.job_workspace import create_job_workspace, safe_slug, validate_input_file
 from core.job_manifest import build_job_manifest, write_job_manifest
 from core.job_stages import normalize_job_stage
@@ -17,6 +18,51 @@ from core.product_hardening import (
     write_conversion_report,
     write_manual_qa_log_template,
 )
+
+
+def _chapterfold_settings_from_worker_settings(settings):
+    """Convert web/worker settings into the legacy EPUB ChapterfoldSettings model."""
+    if settings is None:
+        return ChapterfoldSettings()
+
+    if isinstance(settings, ChapterfoldSettings):
+        return settings
+
+    if not isinstance(settings, dict):
+        return settings
+
+    allowed = set(getattr(ChapterfoldSettings, "__dataclass_fields__", {}).keys())
+    payload = {key: value for key, value in settings.items() if key in allowed}
+
+    if (
+        "imposed_pages_per_signature" in allowed
+        and "imposed_pages_per_signature" not in payload
+        and "pages_per_signature" in settings
+    ):
+        payload["imposed_pages_per_signature"] = settings["pages_per_signature"]
+
+    return ChapterfoldSettings(**payload)
+
+
+def run_chapterfold_job(*args, **kwargs):
+    """Compatibility wrapper for the worker-safe engine API.
+
+    core.job.run_chapterfold_job expects ChapterfoldJobInput, while the newer
+    engine boundary may call it with explicit input_epub/output_dir/settings.
+    """
+    if "input_epub" in kwargs:
+        input_epub = Path(kwargs.pop("input_epub"))
+        output_dir = Path(kwargs.pop("output_dir"))
+        settings = _chapterfold_settings_from_worker_settings(kwargs.pop("settings", None))
+
+        job = ChapterfoldJobInput(
+            input_epub=input_epub,
+            output_dir=output_dir,
+            settings=settings,
+        )
+        return _legacy_run_chapterfold_job(job)
+
+    return _legacy_run_chapterfold_job(*args, **kwargs)
 
 
 @dataclass
@@ -388,3 +434,45 @@ def run_engine_job(
             )
             result.manifest_json = str(write_job_manifest(manifest, manifest_json_path))
         return result
+
+# --- Worker result report compatibility guard ---
+_run_engine_job_impl = run_engine_job
+
+
+def _ensure_worker_result_report(result):
+    """Ensure worker/API calls always materialize job_result.json when reported."""
+    from pathlib import Path as _Path
+    import json as _json
+
+    report_json = getattr(result, "report_json", None)
+
+    if not report_json:
+        manifest_json = getattr(result, "manifest_json", None)
+        if manifest_json:
+            report_json = str(_Path(manifest_json).with_name("job_result.json"))
+            try:
+                result.report_json = report_json
+            except Exception:
+                pass
+
+    if report_json:
+        report_path = _Path(report_json)
+        if not report_path.exists():
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+
+            if hasattr(result, "to_json"):
+                payload = result.to_json()
+            elif hasattr(result, "to_dict"):
+                payload = _json.dumps(result.to_dict(), indent=2, sort_keys=True)
+            else:
+                payload = _json.dumps(result, indent=2, sort_keys=True, default=str)
+
+            report_path.write_text(payload + "\n", encoding="utf-8")
+
+    return result
+
+
+def run_engine_job(*args, **kwargs):
+    result = _run_engine_job_impl(*args, **kwargs)
+    return _ensure_worker_result_report(result)
+
