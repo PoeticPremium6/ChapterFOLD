@@ -219,3 +219,5 @@ The desktop app is usable, but still evolving. Expect changes to cleanup heurist
 
 ## License
 
+MIT License
+Copyright (c) 2026 PoeticPremium BioStudio
